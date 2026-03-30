@@ -18,6 +18,8 @@ if('serviceWorker' in navigator){
 }
 </script>
 <title>우리일정</title>
+<!-- 📊 SheetJS (엑셀 파일 파싱) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <!-- 🔥 Firebase 연동 -->
 <script type="module">
@@ -292,6 +294,22 @@ html, body {
 .user-row { display:flex; align-items:center; justify-content:space-between; padding:6px 0; border-bottom:1px solid #f0f0f0; }
 .user-dot { width:10px; height:10px; border-radius:50%; margin-right:8px; display:inline-block; }
 
+/* ── 엑셀 가져오기 모달 ── */
+.xl-modal-overlay { display:none; position:absolute; inset:0; background:rgba(0,0,0,.45); z-index:2000; align-items:flex-end; }
+.xl-modal-overlay.open { display:flex; }
+.xl-modal { background:#fff; border-radius:18px 18px 0 0; width:100%; padding:18px 16px 28px; max-height:88vh; overflow-y:auto; }
+.xl-modal-title { font-size:15px; font-weight:bold; color:#5A9A32; margin-bottom:4px; }
+.xl-modal-sub { font-size:11px; color:#999; margin-bottom:14px; }
+.xl-col-table { width:100%; border-collapse:collapse; font-size:12px; margin-bottom:14px; }
+.xl-col-table th { background:#F2F8EC; color:#5A9A32; padding:6px 8px; text-align:left; font-weight:bold; border-bottom:1px solid #C5DEBB; }
+.xl-col-table td { padding:6px 8px; border-bottom:1px solid #f0f0f0; vertical-align:middle; }
+.xl-col-table select { font-size:11px; border:1px solid #C5DEBB; border-radius:6px; padding:3px 5px; background:#fff; color:#333; }
+.xl-preview-box { background:#F8FBF5; border-radius:8px; padding:10px; margin-bottom:14px; font-size:11px; color:#555; max-height:120px; overflow-y:auto; }
+.xl-preview-row { padding:3px 0; border-bottom:1px solid #eee; }
+.xl-btn-row { display:flex; gap:8px; }
+.xl-btn-cancel { flex:1; padding:10px; border:1px solid #ccc; border-radius:10px; background:#fff; color:#666; font-size:13px; cursor:pointer; }
+.xl-btn-import { flex:2; padding:10px; border:none; border-radius:10px; background:#6BA840; color:#fff; font-size:13px; font-weight:bold; cursor:pointer; }
+
 /* ── 하단 탭바 ── */
 .tabbar { display:flex; background:#fff; border-top:1px solid #e0e0e0; flex-shrink:0; }
 .tab-item { flex:1; display:flex; flex-direction:column; align-items:center; padding:7px 0; cursor:pointer; font-size:10px; color:#999; border:none; background:none; }
@@ -560,6 +578,15 @@ html, body {
           </div>
         </div>
         <div class="setting-card">
+          <div class="setting-title">📊 엑셀 가져오기 / 내보내기</div>
+          <p style="font-size:11px;color:#888;margin-bottom:10px;">연도·월·일·유저별 컬럼 형식의 엑셀 파일을 가져오거나 내보낼 수 있어요.</p>
+          <div style="display:flex;gap:8px;">
+            <button onclick="exportExcel()" style="flex:1;padding:10px;border:1px solid #5A9A32;border-radius:10px;background:#fff;color:#5A9A32;font-size:12px;font-weight:bold;cursor:pointer;">📤 엑셀로 내보내기</button>
+            <button onclick="openExcelImport()" style="flex:1;padding:10px;border:none;border-radius:10px;background:#5A9A32;color:#fff;font-size:12px;font-weight:bold;cursor:pointer;">📂 엑셀 가져오기</button>
+          </div>
+          <input type="file" id="xlFileInput" accept=".xlsx,.xls" style="display:none;" onchange="handleExcelFile(this)">
+        </div>
+        <div class="setting-card">
           <div class="setting-title">ℹ️ 앱 정보</div>
           <p style="font-size:12px;color:#666;">우리일정 v1.0.0</p>
         </div>
@@ -577,6 +604,27 @@ html, body {
 
   <!-- 기간 설정 커스텀 드롭다운 -->
   <div id="rangeDropdown" style="display:none;position:absolute;z-index:900;background:#fff;border:1px solid #ccc;border-radius:7px;box-shadow:0 4px 14px rgba(0,0,0,.18);overflow-y:auto;max-height:150px;min-width:60px;"></div>
+
+  <!-- ══ 엑셀 가져오기 모달 ══ -->
+  <div class="xl-modal-overlay" id="xlModal">
+    <div class="xl-modal">
+      <div class="xl-modal-title">📊 엑셀 가져오기</div>
+      <div class="xl-modal-sub" id="xlModalSub">파일을 분석 중이에요...</div>
+      <!-- 컬럼 매핑 테이블 -->
+      <table class="xl-col-table" id="xlColTable">
+        <thead><tr><th>엑셀 컬럼명</th><th>용도 설정</th></tr></thead>
+        <tbody id="xlColBody"></tbody>
+      </table>
+      <!-- 미리보기 -->
+      <div style="font-size:11px;font-weight:bold;color:#5A9A32;margin-bottom:6px;">📋 미리보기 (최대 5개)</div>
+      <div class="xl-preview-box" id="xlPreview"></div>
+      <!-- 버튼 -->
+      <div class="xl-btn-row">
+        <button class="xl-btn-cancel" onclick="closeXlModal()">취소</button>
+        <button class="xl-btn-import" onclick="confirmExcelImport()">✅ 가져오기</button>
+      </div>
+    </div>
+  </div>
 
   <!-- ══ 일정 추가/수정 모달 ══ -->
   <div class="modal-overlay" id="eventModal">
@@ -1230,6 +1278,114 @@ function exportData(){
   a.download='우리일정_백업.json'; a.click();
   alert('📤 파일 다운로드 완료! 친구에게 보내세요.');
 }
+
+// ═══════════════════════════════════════════
+//  엑셀로 내보내기
+// ═══════════════════════════════════════════
+function exportExcel(){
+  if(!events.length){ alert('내보낼 일정이 없어요.'); return; }
+  if(typeof XLSX === 'undefined'){ alert('SheetJS가 로드되지 않았어요. 인터넷 연결을 확인해주세요.'); return; }
+
+  // ── 컬럼 구조 결정 ──
+  // 고정 컬럼: 연도, 월, 일, 요일, 특이사항
+  // 공동 컬럼: users가 2명 이상인 이벤트를 위한 컬럼들 (고유 조합별)
+  // 개인 컬럼: 각 유저별 1개
+
+  // 이벤트에서 등장하는 모든 고유 유저조합(2명이상) 수집
+  const sharedCombos = new Set();
+  events.forEach(ev => {
+    if(ev.users && ev.users.length > 1){
+      const key = [...ev.users].sort().join('&');
+      sharedCombos.add(key);
+    }
+  });
+
+  // 컬럼 배열 구성: [고정5개] + [공동조합들] + [개인유저들]
+  const sharedCols = [...sharedCombos].sort();  // 예: ["세혜&지석"]
+  const userCols   = [...users];                 // 예: ["세혜","지석"]
+
+  // 헤더행 (원본 양식 그대로)
+  const WEEKDAYS = ['일','월','화','수','목','금','토'];
+  const header   = ['연도','월','일','요일','특이사항', ...sharedCols, ...userCols];
+
+  // ── 날짜별로 이벤트 그룹화 ──
+  const byDate = {};
+  events.forEach(ev => {
+    if(!byDate[ev.date]) byDate[ev.date] = [];
+    byDate[ev.date].push(ev);
+  });
+
+  const sortedDates = Object.keys(byDate).sort();
+
+  // ── 행 생성 ──
+  const rows = [header];
+
+  sortedDates.forEach(dateStr => {
+    const [yr, mo, dy] = dateStr.split('-').map(Number);
+    const dateObj  = new Date(yr, mo-1, dy);
+    const weekday  = WEEKDAYS[dateObj.getDay()];
+    const holiday  = HOLIDAYS[dateStr] || '';
+
+    // 이 날짜의 이벤트들을 컬럼별로 분류
+    // colIdx → [셀 텍스트 배열]
+    const colTexts = {};
+    const colStart = 5; // 특이사항 다음 인덱스
+
+    byDate[dateStr].forEach(ev => {
+      let colIdx;
+      if(ev.users && ev.users.length > 1){
+        // 공동 이벤트 → 해당 조합 컬럼
+        const key = [...ev.users].sort().join('&');
+        const idx = sharedCols.indexOf(key);
+        colIdx = idx >= 0 ? colStart + idx : null;
+      } else {
+        // 개인 이벤트 → 해당 유저 컬럼
+        const u   = ev.users ? ev.users[0] : ev.userLabel;
+        const idx = userCols.indexOf(u);
+        colIdx = idx >= 0 ? colStart + sharedCols.length + idx : null;
+      }
+      if(colIdx === null) return;
+      if(!colTexts[colIdx]) colTexts[colIdx] = [];
+      // 시간 있으면 앞에 붙이기 (원본 양식: "15:00 내용")
+      const cell = ev.time ? `${ev.time} ${ev.title}` : ev.title;
+      colTexts[colIdx].push(cell);
+    });
+
+    // 행 배열 (빈칸은 '')
+    const row = [yr, mo, dy, weekday, holiday];
+    const totalUserCols = sharedCols.length + userCols.length;
+    for(let i=0; i<totalUserCols; i++){
+      const texts = colTexts[colStart+i];
+      row.push(texts ? texts.join('\n') : '');
+    }
+    rows.push(row);
+  });
+
+  // ── SheetJS로 워크북 생성 ──
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+
+  // 컬럼 너비 설정 (원본 양식 참고)
+  ws['!cols'] = [
+    {wch:8},   // 연도
+    {wch:5},   // 월
+    {wch:5},   // 일
+    {wch:5},   // 요일
+    {wch:12},  // 특이사항
+    ...sharedCols.map(()=>({wch:40})),  // 공동 컬럼
+    ...userCols.map(()=>({wch:35})),    // 개인 컬럼
+  ];
+
+  // 행 높이: 긴 텍스트 셀은 높이 자동 확장 (기본 15)
+  ws['!rows'] = rows.map(()=>({hpx:15}));
+
+  XLSX.utils.book_append_sheet(wb, ws, '일정');
+
+  // 파일명: 우리일정_YYYYMMDD.xlsx
+  const today = new Date();
+  const fname = `우리일정_${today.getFullYear()}${String(today.getMonth()+1).padStart(2,'0')}${String(today.getDate()).padStart(2,'0')}.xlsx`;
+  XLSX.writeFile(wb, fname);
+}
 function importData(){
   const input=document.createElement('input');
   input.type='file'; input.accept='.json';
@@ -1243,6 +1399,275 @@ function importData(){
     };
     r.readAsText(e.target.files[0]);
   }; input.click();
+}
+
+// ═══════════════════════════════════════════
+//  엑셀 가져오기
+// ═══════════════════════════════════════════
+let _xlParsed = null; // 파싱된 엑셀 데이터 임시 저장
+
+function openExcelImport(){
+  document.getElementById('xlFileInput').value='';
+  document.getElementById('xlFileInput').click();
+}
+
+function closeXlModal(){
+  document.getElementById('xlModal').classList.remove('open');
+  _xlParsed = null;
+}
+
+// 셀 텍스트에서 시간 추출: "15:00 내용" → {time:"15:00", title:"내용"}
+function _extractTime(text){
+  if(!text) return {time:'', title:''};
+  const s = String(text).trim();
+  const m = s.match(/^(\d{1,2}:\d{2})\s*(.*)$/);
+  if(m) return {time: m[1], title: m[2].trim() || s};
+  return {time:'', title: s};
+}
+
+function handleExcelFile(input){
+  const file = input.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      const wb = XLSX.read(e.target.result, {type:'array'});
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+      if(!rows.length){ alert('빈 파일이에요.'); return; }
+
+      // 헤더행 찾기 (연도/년/월/일 포함된 첫 행)
+      let hdrIdx = 0;
+      for(let i=0;i<Math.min(5,rows.length);i++){
+        const r = rows[i].map(v=>String(v));
+        if(r.some(v=>/^(연도|년도|년)$/.test(v)) && r.some(v=>/^월$/.test(v))){
+          hdrIdx = i; break;
+        }
+      }
+      const headers = rows[hdrIdx].map(v=>String(v).trim());
+      const dataRows = rows.slice(hdrIdx+1);
+
+      _xlParsed = { headers, dataRows };
+      _buildXlModal(headers, dataRows);
+      document.getElementById('xlModal').classList.add('open');
+    }catch(err){
+      alert('엑셀 파일 읽기 실패: '+err.message);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// 컬럼 용도 옵션 목록
+function _colRoleOptions(selected){
+  const opts = [
+    {v:'ignore',  l:'사용 안 함'},
+    {v:'year',    l:'📅 연도'},
+    {v:'month',   l:'📅 월'},
+    {v:'day',     l:'📅 일'},
+    {v:'special', l:'📌 특이사항 (무시)'},
+    {v:'shared',  l:'👥 공동 일정'},
+  ];
+  // 현재 등록된 유저들을 옵션에 추가
+  users.forEach(u => opts.push({v:'user:'+u, l:'👤 '+u+' 일정'}));
+  opts.push({v:'newuser', l:'➕ 새 유저로 추가'});
+  return opts.map(o=>`<option value="${o.v}"${selected===o.v?' selected':''}>${o.l}</option>`).join('');
+}
+
+function _guessRole(header){
+  const h = header.replace(/\s/g,'');
+  if(/^(연도|년도|년)$/.test(h))  return 'year';
+  if(/^월$/.test(h))              return 'month';
+  if(/^일$/.test(h))              return 'day';
+  if(/^요일$/.test(h))            return 'ignore';
+  if(/특이|공휴|holiday/i.test(h)) return 'special';
+  if(/[&＆+]/.test(h))            return 'shared';  // "세혜&지석" 같은 패턴
+  // 유저 이름 매칭
+  for(const u of users){
+    if(h === u) return 'user:'+u;
+  }
+  // 헤더가 비어있으면 무시
+  if(!h || h==='undefined') return 'ignore';
+  return 'newuser'; // 기본: 새 유저로 추가
+}
+
+function _buildXlModal(headers, dataRows){
+  // 컬럼 매핑 테이블
+  const tbody = document.getElementById('xlColBody');
+  tbody.innerHTML = headers.map((h,i)=>{
+    const role = _guessRole(h);
+    // 새 유저로 추가인 경우 유저 이름 입력란 표시
+    const extra = role==='newuser'
+      ? `<input id="xlNewUser_${i}" class="form-input" style="margin-top:4px;font-size:11px;padding:3px 6px;" placeholder="유저 이름 입력" value="${h}">`
+      : '';
+    return `<tr>
+      <td style="font-weight:bold;">${h||'(빈 컬럼)'}</td>
+      <td>
+        <select id="xlRole_${i}" onchange="updateXlPreview()">
+          ${_colRoleOptions(role)}
+        </select>
+        ${extra}
+      </td>
+    </tr>`;
+  }).join('');
+  _updateXlPreviewInner(headers, dataRows);
+}
+
+function updateXlPreview(){
+  if(!_xlParsed) return;
+  _updateXlPreviewInner(_xlParsed.headers, _xlParsed.dataRows);
+}
+
+function _updateXlPreviewInner(headers, dataRows){
+  const sub = document.getElementById('xlModalSub');
+  const preview = document.getElementById('xlPreview');
+
+  // 현재 매핑 읽기
+  const roles = headers.map((_,i)=>{
+    const sel = document.getElementById('xlRole_'+i);
+    return sel ? sel.value : 'ignore';
+  });
+
+  const yearIdx  = roles.indexOf('year');
+  const monthIdx = roles.indexOf('month');
+  const dayIdx   = roles.indexOf('day');
+
+  if(yearIdx<0||monthIdx<0||dayIdx<0){
+    sub.textContent = '⚠️ 연도·월·일 컬럼을 모두 지정해주세요.';
+    preview.innerHTML = '';
+    return;
+  }
+
+  // 미리보기 이벤트 생성
+  const previewEvents = [];
+  for(const row of dataRows){
+    if(previewEvents.length>=5) break;
+    const yr  = parseInt(row[yearIdx]);
+    const mo  = parseInt(row[monthIdx]);
+    const dy  = parseInt(row[dayIdx]);
+    if(!yr||!mo||!dy) continue;
+    const dateStr = `${yr}-${String(mo).padStart(2,'0')}-${String(dy).padStart(2,'0')}`;
+
+    roles.forEach((role,ci)=>{
+      if(role==='ignore'||role==='year'||role==='month'||role==='day'||role==='special') return;
+      const cellVal = String(row[ci]||'').trim();
+      if(!cellVal) return;
+      const {time, title} = _extractTime(cellVal);
+      let userList = [];
+      if(role==='shared'){
+        // 공동 일정: 공동 컬럼 헤더에서 유저 추출 (예: "세혜&지석")
+        const colHeader = headers[ci];
+        const parts = colHeader.split(/[&＆+]/);
+        userList = parts.map(p=>p.trim()).filter(Boolean);
+        if(!userList.length) userList = users.slice();
+      } else if(role.startsWith('user:')){
+        userList = [role.replace('user:','')];
+      } else if(role==='newuser'){
+        const inp = document.getElementById('xlNewUser_'+ci);
+        const name = inp ? inp.value.trim() : headers[ci];
+        userList = [name||headers[ci]];
+      }
+      if(previewEvents.length<5){
+        previewEvents.push({dateStr, title, time, users: userList});
+      }
+    });
+  }
+
+  sub.textContent = `총 ${_countImportEvents(roles, dataRows)}개 일정을 가져와요.`;
+  preview.innerHTML = previewEvents.map(ev=>
+    `<div class="xl-preview-row">📅 ${ev.dateStr}${ev.time?' '+ev.time:''} — ${ev.title} <span style="color:#6BA840;">[${ev.users.join(', ')}]</span></div>`
+  ).join('') || '<div style="color:#aaa;">미리보기할 데이터가 없어요.</div>';
+}
+
+function _countImportEvents(roles, dataRows){
+  let cnt = 0;
+  const yearIdx  = roles.indexOf('year');
+  const monthIdx = roles.indexOf('month');
+  const dayIdx   = roles.indexOf('day');
+  if(yearIdx<0||monthIdx<0||dayIdx<0) return 0;
+  for(const row of dataRows){
+    const yr = parseInt(row[yearIdx]);
+    const mo = parseInt(row[monthIdx]);
+    const dy = parseInt(row[dayIdx]);
+    if(!yr||!mo||!dy) continue;
+    roles.forEach((role,ci)=>{
+      if(role==='ignore'||role==='year'||role==='month'||role==='day'||role==='special') return;
+      if(String(row[ci]||'').trim()) cnt++;
+    });
+  }
+  return cnt;
+}
+
+function confirmExcelImport(){
+  if(!_xlParsed) return;
+  const {headers, dataRows} = _xlParsed;
+  const roles = headers.map((_,i)=>{
+    const sel = document.getElementById('xlRole_'+i);
+    return sel ? sel.value : 'ignore';
+  });
+  const yearIdx  = roles.indexOf('year');
+  const monthIdx = roles.indexOf('month');
+  const dayIdx   = roles.indexOf('day');
+  if(yearIdx<0||monthIdx<0||dayIdx<0){
+    alert('연도·월·일 컬럼을 모두 지정해야 해요.');
+    return;
+  }
+
+  // 새 유저 이름 수집 & 앱 유저 목록에 추가
+  const newUserMap = {}; // colIdx → 이름
+  roles.forEach((role,ci)=>{
+    if(role==='newuser'){
+      const inp = document.getElementById('xlNewUser_'+ci);
+      const name = (inp ? inp.value.trim() : '') || headers[ci] || ('유저'+(ci+1));
+      newUserMap[ci] = name;
+      if(!users.includes(name)) users.push(name);
+    }
+    if(role==='shared'){
+      const colHeader = headers[ci];
+      const parts = colHeader.split(/[&＆+]/);
+      parts.forEach(p=>{ const n=p.trim(); if(n&&!users.includes(n)) users.push(n); });
+    }
+  });
+
+  // 이벤트 생성
+  let addedCount = 0;
+  for(const row of dataRows){
+    const yr = parseInt(row[yearIdx]);
+    const mo = parseInt(row[monthIdx]);
+    const dy = parseInt(row[dayIdx]);
+    if(!yr||!mo||!dy) continue;
+    const dateStr = `${yr}-${String(mo).padStart(2,'0')}-${String(dy).padStart(2,'0')}`;
+
+    roles.forEach((role,ci)=>{
+      if(role==='ignore'||role==='year'||role==='month'||role==='day'||role==='special') return;
+      const cellVal = String(row[ci]||'').trim();
+      if(!cellVal) return;
+      const {time, title} = _extractTime(cellVal);
+
+      let userList = [];
+      if(role==='shared'){
+        const parts = headers[ci].split(/[&＆+]/);
+        userList = parts.map(p=>p.trim()).filter(Boolean);
+        if(!userList.length) userList = users.slice();
+      } else if(role.startsWith('user:')){
+        userList = [role.replace('user:','')];
+      } else if(role==='newuser'){
+        userList = [newUserMap[ci]||headers[ci]];
+      }
+
+      const userLabel = userList.length===1 ? userList[0]
+        : userList.join('&');
+      const newId = 'xl_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
+      events.push({id:newId, date:dateStr, userLabel, users:userList, time, title});
+      addedCount++;
+    });
+  }
+
+  renderAll();
+  renderUserList();
+  buildUserFilterChips();
+  buildDatalistOptions();
+  closeXlModal();
+  alert(`✅ ${addedCount}개 일정을 가져왔어요!`);
 }
 
 // ═══════════════════════════════════════════
