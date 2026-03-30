@@ -1,29 +1,5 @@
 <!DOCTYPE html>
 <html lang="ko">
-  
-// Import the functions you need from the SDKs you need
-import { initializeApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
-
-// Your web app's Firebase configuration
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
-const firebaseConfig = {
-  apiKey: "AIzaSyBwbnvku6eWg1yUJqK55jGH6m6RRbTV280",
-  authDomain: "woori-schedule.firebaseapp.com",
-  databaseURL: "https://woori-schedule-default-rtdb.firebaseio.com",
-  projectId: "woori-schedule",
-  storageBucket: "woori-schedule.firebasestorage.app",
-  messagingSenderId: "21749457760",
-  appId: "1:21749457760:web:d6c10c6965a38179eb7405",
-  measurementId: "G-QW6ZKPPTBN"
-};
-
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
-  
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -42,6 +18,37 @@ if('serviceWorker' in navigator){
 }
 </script>
 <title>우리일정</title>
+
+<!-- 🔥 Firebase 연동 -->
+<script type="module">
+import { initializeApp }      from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged }
+                               from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+
+const firebaseConfig = {
+  apiKey:            "AIzaSyBwbnvku6eWg1yUJqK55jGH6m6RRbTV280",
+  authDomain:        "woori-schedule.firebaseapp.com",
+  databaseURL:       "https://woori-schedule-default-rtdb.firebaseio.com",
+  projectId:         "woori-schedule",
+  storageBucket:     "woori-schedule.firebasestorage.app",
+  messagingSenderId: "21749457760",
+  appId:             "1:21749457760:web:d6c10c6965a38179eb7405"
+};
+
+const app      = initializeApp(firebaseConfig);
+const auth     = getAuth(app);
+const provider = new GoogleAuthProvider();
+
+// 일반 스크립트에서 호출할 수 있도록 window에 노출
+window._fbSignIn = () => signInWithPopup(auth, provider);
+
+// 이미 로그인된 세션이 있으면 자동 로그인
+onAuthStateChanged(auth, user => {
+  if(user && typeof window._fbAutoLogin === 'function'){
+    window._fbAutoLogin(user);
+  }
+});
+</script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body {
@@ -585,8 +592,7 @@ html, body {
         <input class="form-input" id="fDay"   type="number" placeholder="일"   min="1"    max="31"   value="1">
       </div>
       <div class="form-label">⏰ 시간 (선택)</div>
-      <input class="form-input" id="fTime" list="listTimeModal" placeholder="예: 17:00" maxlength="5">
-      <datalist id="listTimeModal"></datalist>
+      <input class="form-input" id="fTime" placeholder="예) 05:00, 19:00  (24시간제)" maxlength="5">
       <div class="form-label">👤 참여 유저</div>
       <div class="user-chips-select" id="fUserChips"></div>
       <div class="form-label">📝 내용</div>
@@ -814,14 +820,7 @@ function buildDatalistOptions(){
   const hourRangesHtml = hourRanges.map(t=>`<option value="${t}">`).join('');
   document.getElementById('listTime').innerHTML = hourRangesHtml;
 
-  // 모달 시간 입력: 30분 단위 목록 유지 (정확한 시간 입력용)
-  const timeSet = new Set();
-  for(let h=0;h<24;h++){
-    timeSet.add(`${pad(h)}:00`);
-    timeSet.add(`${pad(h)}:30`);
-  }
-  events.forEach(e=>{ if(e.time) timeSet.add(e.time); });
-  document.getElementById('listTimeModal').innerHTML = [...timeSet].sort().map(t=>`<option value="${t}">`).join('');
+  // 모달 시간: 직접 입력 방식 (datalist 없음)
   // 특이사항
   const holSet = new Set(Object.values(HOLIDAYS));
   document.getElementById('listHoliday').innerHTML = [...holSet].map(h=>`<option value="${h}">`).join('');
@@ -1313,14 +1312,43 @@ function renderList(){
 // ═══════════════════════════════════════════
 //  로그인 화면 (미리보기 모의)
 // ═══════════════════════════════════════════
-function loginWithGoogle(){
-  currentUser=users[0]||'나'; // 첫 번째 유저로 로그인 (실제 앱은 Firebase OAuth)
+// 구글 로그인 완료 후 공통 처리
+function _onLoginSuccess(name){
+  currentUser = name;
   document.getElementById('loginScreen').style.display='none';
-  setTimeout(()=>alert(`✅ Google 로그인 성공! (${currentUser})\n미리보기 모드 — 실제 앱에서는 Firebase 연동`),150);
+  renderAll();
 }
+
+// 자동 로그인 콜백 (Firebase onAuthStateChanged 에서 호출)
+window._fbAutoLogin = function(user){
+  const name = user.displayName || user.email.split('@')[0] || '나';
+  _onLoginSuccess(name);
+};
+
+async function loginWithGoogle(){
+  // Firebase가 초기화된 경우 → 실제 구글 로그인
+  if(typeof window._fbSignIn === 'function'){
+    try {
+      const result = await window._fbSignIn();
+      const user   = result.user;
+      const name   = user.displayName || user.email.split('@')[0] || '나';
+      _onLoginSuccess(name);
+    } catch(err){
+      if(err.code === 'auth/popup-closed-by-user') return; // 사용자가 닫은 경우 무시
+      if(err.code === 'auth/unauthorized-domain'){
+        alert('⚠️ Firebase Console에서 이 도메인을 허용해야 해요.\nAuthentication → Authorized domains에\n"saehyehlee-art.github.io" 추가 후 다시 시도해주세요.');
+        return;
+      }
+      alert('로그인 오류: ' + (err.message || err.code));
+    }
+    return;
+  }
+  // Firebase 미설정 → 로컬 모드로 진입
+  _onLoginSuccess(users[0] || '나');
+}
+
 function loginSkip(){
-  currentUser=users[0]||'나'; // 로컬 모드도 첫 유저로 설정
-  document.getElementById('loginScreen').style.display='none';
+  _onLoginSuccess(users[0] || '나');
 }
 
 // ═══════════════════════════════════════════
