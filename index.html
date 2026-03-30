@@ -1431,7 +1431,9 @@ function handleExcelFile(input){
   const reader = new FileReader();
   reader.onload = function(e){
     try{
-      const wb = XLSX.read(e.target.result, {type:'array'});
+      // ✅ Uint8Array로 변환 — iOS Safari 등 모바일 브라우저 호환
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, {type:'array'});
       const ws = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
       if(!rows.length){ alert('빈 파일이에요.'); return; }
@@ -1453,6 +1455,9 @@ function handleExcelFile(input){
     }catch(err){
       alert('엑셀 파일 읽기 실패: '+err.message);
     }
+  };
+  reader.onerror = function(){
+    alert('파일을 읽는 중 오류가 발생했어요. 다시 시도해주세요.');
   };
   reader.readAsArrayBuffer(file);
 }
