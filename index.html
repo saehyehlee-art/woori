@@ -582,9 +582,17 @@ html, body {
           <p style="font-size:11px;color:#888;margin-bottom:10px;">연도·월·일·유저별 컬럼 형식의 엑셀 파일을 가져오거나 내보낼 수 있어요.</p>
           <div style="display:flex;gap:8px;">
             <button onclick="exportExcel()" style="flex:1;padding:10px;border:1px solid #5A9A32;border-radius:10px;background:#fff;color:#5A9A32;font-size:12px;font-weight:bold;cursor:pointer;">📤 엑셀로 내보내기</button>
-            <button onclick="openExcelImport()" style="flex:1;padding:10px;border:none;border-radius:10px;background:#5A9A32;color:#fff;font-size:12px;font-weight:bold;cursor:pointer;">📂 엑셀 가져오기</button>
+            <label for="xlFileInput" style="flex:1;padding:10px;border:none;border-radius:10px;background:#5A9A32;color:#fff;font-size:12px;font-weight:bold;cursor:pointer;text-align:center;display:flex;align-items:center;justify-content:center;">📂 엑셀 가져오기</label>
           </div>
-          <input type="file" id="xlFileInput" accept=".xlsx,.xls" style="display:none;" onchange="handleExcelFile(this)">
+          <!-- iOS Safari: label for= 방식이 programmatic click보다 안정적 -->
+          <!-- accept에 MIME 타입 포함 → Android에서 파일 필터 정확도 향상 -->
+          <input type="file" id="xlFileInput"
+            accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+            style="display:none;" onchange="handleExcelFile(this)">
+          <p style="font-size:10px;color:#aaa;margin-top:8px;line-height:1.6;">
+            📱 <b>iOS</b>: 카카오톡·메일로 받은 파일은 먼저 <b>파일 앱에 저장</b>한 뒤 선택해주세요.<br>
+            🤖 <b>Android</b>: .json 파일이 아닌 <b>.xlsx 엑셀 파일</b>을 선택해주세요.
+          </p>
         </div>
         <div class="setting-card">
           <div class="setting-title">ℹ️ 앱 정보</div>
@@ -1384,7 +1392,25 @@ function exportExcel(){
   // 파일명: 우리일정_YYYYMMDD.xlsx
   const today = new Date();
   const fname = `우리일정_${today.getFullYear()}${String(today.getMonth()+1).padStart(2,'0')}${String(today.getDate()).padStart(2,'0')}.xlsx`;
-  XLSX.writeFile(wb, fname);
+
+  // ✅ iOS/Android 호환 다운로드 — XLSX.writeFile 대신 Blob 방식 사용
+  try {
+    const wbout = XLSX.write(wb, {bookType:'xlsx', type:'array'});
+    const blob  = new Blob([new Uint8Array(wbout)], {
+      type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    const url = URL.createObjectURL(blob);
+    const a   = document.createElement('a');
+    a.style.display = 'none';
+    a.href     = url;
+    a.download = fname;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 300);
+  } catch(err) {
+    // 최후 fallback (구형 브라우저)
+    XLSX.writeFile(wb, fname);
+  }
 }
 function importData(){
   const input=document.createElement('input');
@@ -1428,11 +1454,28 @@ function _extractTime(text){
 function handleExcelFile(input){
   const file = input.files[0];
   if(!file) return;
+
   const reader = new FileReader();
   reader.onload = function(e){
     try{
+      const buffer = e.target.result;
+
+      // 🔍 xlsx 파일 여부 검증 — xlsx는 ZIP(PK) 포맷으로 시작
+      const magic = new Uint8Array(buffer, 0, 4);
+      const isZip  = magic[0]===0x50 && magic[1]===0x4B; // PK
+      const isJson = magic[0]===0x7B;                     // {
+
+      if(isJson){
+        alert('❌ JSON 백업 파일이에요.\n\n엑셀(.xlsx) 파일을 선택해주세요.\n(카카오톡에서 받은 파일은 먼저\n"파일 앱에 저장" 후 선택해주세요.)');
+        return;
+      }
+      if(!isZip){
+        alert('❌ 올바른 엑셀 파일이 아니에요.\n\n.xlsx 파일을 선택해주세요.\niOS: 카카오톡 파일 → 파일 앱에 저장 → 다시 시도');
+        return;
+      }
+
       // ✅ Uint8Array로 변환 — iOS Safari 등 모바일 브라우저 호환
-      const data = new Uint8Array(e.target.result);
+      const data = new Uint8Array(buffer);
       const wb = XLSX.read(data, {type:'array'});
       const ws = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
@@ -1453,11 +1496,11 @@ function handleExcelFile(input){
       _buildXlModal(headers, dataRows);
       document.getElementById('xlModal').classList.add('open');
     }catch(err){
-      alert('엑셀 파일 읽기 실패: '+err.message);
+      alert('엑셀 파일 읽기 실패: '+err.message+'\n\niOS: 카카오톡 파일은 파일 앱에 저장 후 선택해주세요.');
     }
   };
   reader.onerror = function(){
-    alert('파일을 읽는 중 오류가 발생했어요. 다시 시도해주세요.');
+    alert('파일을 읽을 수 없어요.\n\n📱 iOS: 카카오톡에서 파일을 길게 눌러\n"파일 앱에 저장"한 뒤 다시 선택해주세요.');
   };
   reader.readAsArrayBuffer(file);
 }
