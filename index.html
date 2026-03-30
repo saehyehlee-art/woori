@@ -678,17 +678,9 @@ html, body {
 // ═══════════════════════════════════════════
 //  데이터
 // ═══════════════════════════════════════════
-let events = [
-  {id:'s1', date:'2026-01-15', userLabel:'나',      users:['나'],          time:'17:00', title:'저녁 식사'},
-  {id:'s2', date:'2026-01-15', userLabel:'친구A',   users:['친구A'],       time:'19:30', title:'공부'},
-  {id:'s3', date:'2026-01-15', userLabel:'나&친구A',users:['나','친구A'],  time:'20:00', title:'같이 스터디'},
-  {id:'s4', date:'2026-02-14', userLabel:'나&친구A',users:['나','친구A'],  time:'18:00', title:'발렌타인 영화'},
-  {id:'s5', date:'2026-03-01', userLabel:'나',      users:['나'],          time:'',      title:'삼일절 나들이'},
-  {id:'s6', date:'2026-05-05', userLabel:'나&친구A',users:['나','친구A'],  time:'14:00', title:'어린이날 행사'},
-  {id:'s7', date:'2026-07-17', userLabel:'친구A',   users:['친구A'],       time:'11:00', title:'제헌절 모임'},
-];
+let events = [];
 
-let users = ['나', '친구A'];
+let users = ['나'];
 
 const HOLIDAYS = {
   '2026-01-01':'신정','2026-01-28':'설날 연휴','2026-01-29':'설날','2026-01-30':'설날 연휴',
