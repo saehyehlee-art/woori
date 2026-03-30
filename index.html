@@ -21,11 +21,13 @@ if('serviceWorker' in navigator){
 <!-- 📊 SheetJS (엑셀 파일 파싱) -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
-<!-- 🔥 Firebase 연동 -->
+<!-- 🔥 Firebase 연동 (Auth + Realtime Database) -->
 <script type="module">
 import { initializeApp }      from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
 import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged }
                                from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+import { getDatabase, ref, set, get, onValue }
+                               from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js';
 
 const firebaseConfig = {
   apiKey:            "AIzaSyBwbnvku6eWg1yUJqK55jGH6m6RRbTV280",
@@ -34,22 +36,41 @@ const firebaseConfig = {
   projectId:         "woori-schedule",
   storageBucket:     "woori-schedule.firebasestorage.app",
   messagingSenderId: "21749457760",
-  appId:             "1:21749457760:web:d6c10c6965a38179eb7405"
+  appId:             "1:21749457780:web:d6c10c6965a38179eb7405"
 };
 
 const app      = initializeApp(firebaseConfig);
 const auth     = getAuth(app);
+const db       = getDatabase(app);
 const provider = new GoogleAuthProvider();
 
-// 일반 스크립트에서 호출할 수 있도록 window에 노출
+// ── Auth ──────────────────────────────
 window._fbSignIn = () => signInWithPopup(auth, provider);
 
-// 이미 로그인된 세션이 있으면 자동 로그인
 onAuthStateChanged(auth, user => {
-  if(user && typeof window._fbAutoLogin === 'function'){
-    window._fbAutoLogin(user);
-  }
+  if(user && typeof window._fbAutoLogin === 'function') window._fbAutoLogin(user);
 });
+
+// ── Realtime Database helpers ─────────
+// 방이 존재하는지 확인
+window._fbRoomExists = async (code) => {
+  const snap = await get(ref(db, `rooms/${code}/created`));
+  return snap.exists();
+};
+// 새 방 생성
+window._fbCreateRoom = (code, data) =>
+  set(ref(db, `rooms/${code}`), { ...data, created: Date.now() });
+// 방 전체 데이터 덮어쓰기
+window._fbSyncRoom = (code, data) =>
+  set(ref(db, `rooms/${code}/data`), data);
+// 방 data 한 번 읽기
+window._fbGetRoomData = async (code) => {
+  const snap = await get(ref(db, `rooms/${code}/data`));
+  return snap.val();
+};
+// 실시간 리스닝 (구독 해제 함수 반환)
+window._fbListenRoom = (code, cb) =>
+  onValue(ref(db, `rooms/${code}/data`), snap => cb(snap.val()));
 </script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -384,6 +405,46 @@ html, body {
   font-size:9px; border-radius:4px; padding:2px 6px; margin-top:6px;
 }
 
+/* ── 방(Room) 참여 화면 ── */
+.room-screen {
+  position:absolute; inset:0; z-index:490;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  padding:28px 24px;
+  background:linear-gradient(160deg,#5BAD42 0%,#3A8C28 45%,#1E6614 100%);
+}
+.room-logo  { font-size:52px; margin-bottom:8px; filter:drop-shadow(0 3px 10px rgba(0,0,0,.25)); }
+.room-title { font-size:22px; font-weight:bold; color:#fff; margin-bottom:4px; }
+.room-sub   { font-size:11px; color:rgba(255,255,255,.8); margin-bottom:28px; text-align:center; line-height:1.6; }
+.room-card  { background:rgba(255,255,255,.96); border-radius:14px; padding:16px; width:100%; margin-bottom:12px; }
+.room-card-title { font-size:12px; font-weight:bold; color:#3A8C28; margin-bottom:10px; }
+.room-code-display {
+  font-size:28px; font-weight:bold; letter-spacing:6px; color:#1E6614;
+  text-align:center; padding:10px; background:#F2F8EC; border-radius:8px;
+  margin:8px 0; font-family:monospace;
+}
+.room-code-hint { font-size:10px; color:#888; text-align:center; margin-bottom:4px; }
+.room-input {
+  width:100%; border:1.5px solid #C5DEBB; border-radius:8px;
+  padding:10px 12px; font-size:18px; text-align:center; letter-spacing:4px;
+  font-family:monospace; font-weight:bold; color:#1E6614; outline:none;
+  text-transform:uppercase;
+}
+.room-input:focus { border-color:#5BAD42; }
+.room-btn {
+  width:100%; padding:11px; border:none; border-radius:10px;
+  font-size:13px; font-weight:bold; cursor:pointer; margin-top:8px; transition:.15s;
+}
+.room-btn-primary { background:#5BAD42; color:#fff; }
+.room-btn-primary:hover { background:#4A9A34; }
+.room-btn-secondary { background:rgba(255,255,255,.2); color:rgba(255,255,255,.9); border:1.5px solid rgba(255,255,255,.4); }
+.room-btn-secondary:hover { background:rgba(255,255,255,.3); }
+.room-sync-badge {
+  position:fixed; top:env(safe-area-inset-top,0); right:0; left:0;
+  background:#3A8C28; color:#fff; font-size:10px; text-align:center;
+  padding:3px 8px; z-index:999; display:none;
+}
+.room-sync-badge.show { display:block; }
+
 /* 확인 모달 */
 .confirm-overlay { display:none; position:absolute; inset:0; background:rgba(0,0,0,.5); z-index:200; align-items:center; justify-content:center; }
 .confirm-overlay.open { display:flex; }
@@ -420,6 +481,67 @@ html, body {
       
     </div>
   </div>
+
+  <!-- 방(Room) 참여 화면 -->
+  <div class="room-screen" id="roomScreen" style="display:none;">
+    <div class="room-logo">🍀</div>
+    <div class="room-title">우리일정</div>
+    <div class="room-sub">함께 쓸 방을 만들거나<br>친구의 방에 참여해요</div>
+
+    <!-- 새 방 만들기 -->
+    <div class="room-card">
+      <div class="room-card-title">✨ 새 방 만들기</div>
+      <div class="room-code-hint">아래 코드를 친구에게 알려주세요</div>
+      <div class="room-code-display" id="newRoomCode">------</div>
+      <button class="room-btn room-btn-primary" onclick="createRoom()">🏠 이 방 코드로 시작하기</button>
+    </div>
+
+    <!-- 친구 방에 참여하기 -->
+    <div class="room-card">
+      <div class="room-card-title">🔗 친구 방에 참여하기</div>
+      <div class="room-code-hint" style="margin-bottom:6px;">친구에게 받은 6자리 코드를 입력하세요</div>
+      <input class="room-input" id="joinRoomInput" placeholder="XXXXXX" maxlength="6"
+        oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'')">
+      <button class="room-btn room-btn-primary" onclick="joinRoom()">📲 방에 참여하기</button>
+    </div>
+
+    <!-- 방 없이 사용 -->
+    <button class="room-btn room-btn-secondary" onclick="skipRoom()" style="margin-top:4px;">
+      혼자 사용하기 (동기화 없음)
+    </button>
+  </div>
+
+  <!-- 이름 선택 화면 -->
+  <div class="room-screen" id="nameScreen" style="display:none;">
+    <div class="room-logo">🙋</div>
+    <div class="room-title">나는 누구인가요?</div>
+    <div class="room-sub" id="nameScreenSub">방에서 쓸 내 이름을 선택하거나<br>새로 입력해주세요</div>
+
+    <div class="room-card">
+      <div class="room-card-title" id="nameScreenTitle">✏️ 내 이름 입력</div>
+      <!-- 기존 참여자 칩 (joinRoom 시 표시) -->
+      <div id="nameChipsWrap" style="display:none;margin-bottom:10px;">
+        <div class="room-code-hint" style="margin-bottom:6px;">이미 참여 중인 이름 선택</div>
+        <div id="nameChips" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+      </div>
+      <div class="room-code-hint" style="margin-bottom:6px;">또는 이름 직접 입력</div>
+      <input class="room-input" id="nameInput" placeholder="이름 입력 (예: 세혜)" maxlength="20"
+        style="font-size:16px;letter-spacing:0;text-transform:none;font-family:inherit;"
+        oninput="onNameInput()">
+      <button class="room-btn room-btn-primary" id="nameConfirmBtn"
+        onclick="confirmName()" style="margin-top:10px;" disabled>
+        ✅ 이 이름으로 시작하기
+      </button>
+    </div>
+
+    <button class="room-btn room-btn-secondary" id="nameBackBtn"
+      onclick="goBackToRoomScreen()" style="margin-top:4px;">
+      ← 뒤로
+    </button>
+  </div>
+
+  <!-- 실시간 동기화 알림 배지 -->
+  <div class="room-sync-badge" id="syncBadge"></div>
 
   <!-- 앱바 -->
   <div class="appbar">
@@ -570,8 +692,20 @@ html, body {
           </div>
         </div>
         <div class="setting-card">
-          <div class="setting-title">🔗 친구와 일정 공유</div>
-          <p style="font-size:11px;color:#888;margin-bottom:10px;">내 일정을 친구에게 보내거나 가져올 수 있어요.</p>
+          <div class="setting-title">☁️ 실시간 공유 방</div>
+          <div id="currentRoomInfo"><p style="font-size:11px;color:#aaa;">로딩 중...</p></div>
+          <!-- 내 이름 표시 & 변경 -->
+          <div id="myNameInfo" style="margin-top:10px;padding-top:10px;border-top:1px solid #f0f0f0;">
+            <div style="font-size:11px;color:#888;margin-bottom:6px;">내 이름 (수정 권한 기준)</div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span id="myNameBadge" style="font-size:13px;font-weight:bold;color:#1E6614;background:#F2F8EC;border-radius:8px;padding:5px 12px;"></span>
+              <button onclick="openChangeNameModal()" style="font-size:11px;background:none;border:1px solid #ccc;border-radius:6px;padding:4px 10px;cursor:pointer;color:#666;">변경</button>
+            </div>
+          </div>
+        </div>
+        <div class="setting-card">
+          <div class="setting-title">🔗 백업 / 복원</div>
+          <p style="font-size:11px;color:#888;margin-bottom:10px;">내 일정을 JSON 파일로 내보내거나 가져올 수 있어요.</p>
           <div style="display:flex;gap:8px;">
             <button onclick="exportData()" style="flex:1;padding:9px;border:1px solid #6BA840;border-radius:8px;background:#fff;color:#5A9A32;font-size:11px;cursor:pointer;">📤 내보내기</button>
             <button onclick="importData()" style="flex:1;padding:9px;border:none;border-radius:8px;background:#6BA840;color:#fff;font-size:11px;cursor:pointer;">📥 가져오기</button>
@@ -712,6 +846,21 @@ html, body {
       <div class="event-view-line" id="evViewLine"></div>
       <div class="event-view-readonly">🔒 이 일정은 읽기만 가능해요</div>
       <button class="event-view-close" onclick="closeEventView()">확인</button>
+    </div>
+  </div>
+
+  <!-- 이름 변경 모달 -->
+  <div class="confirm-overlay" id="changeNameModal">
+    <div class="confirm-box">
+      <div class="confirm-title">🙋 내 이름 변경</div>
+      <div class="confirm-msg">현재 유저 목록에서 선택하거나 새 이름을 입력하세요</div>
+      <div id="changeNameChips" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-bottom:12px;"></div>
+      <input id="changeNameInput" class="form-input" placeholder="직접 입력" maxlength="20"
+        oninput="onChangeNameInput()" style="margin-bottom:12px;text-align:center;font-size:14px;">
+      <div class="confirm-btns">
+        <button class="cbtn primary" id="changeNameConfirmBtn" onclick="confirmChangeName()" disabled>변경하기</button>
+        <button class="cbtn cancel" onclick="document.getElementById('changeNameModal').classList.remove('open')">취소</button>
+      </div>
     </div>
   </div>
 
@@ -1213,13 +1362,15 @@ function saveEvent(){
     } else {
       events=events.map(e=>e.id===editId?{...e,date:dateStr,userLabel,users:sortedUsers,time,title}:e);
     }
-    closeModal(); buildDatalistOptions(); renderTimeline(); renderCalendar(); renderList(); return;
+    closeModal(); buildDatalistOptions(); renderTimeline(); renderCalendar(); renderList();
+    pushToFirebase(); return;
   }
 
   // 반복 없음
   if(repeatType==='none'){
     events.push({id:uuid(),date:dateStr,userLabel,users:sortedUsers,time,title});
-    closeModal(); buildDatalistOptions(); renderTimeline(); renderCalendar(); renderList(); return;
+    closeModal(); buildDatalistOptions(); renderTimeline(); renderCalendar(); renderList();
+    pushToFirebase(); return;
   }
 
   // 반복 생성
@@ -1259,6 +1410,7 @@ function saveEvent(){
   }
   events.push(...generated);
   closeModal(); buildDatalistOptions(); renderTimeline(); renderCalendar(); renderList();
+  pushToFirebase();
   alert(`✅ 반복 일정 ${generated.length}개 추가됐어요!`);
 }
 
@@ -1275,16 +1427,20 @@ function renderUserList(){
       </div>
       ${users.length>1?`<button onclick="deleteUser('${u}')" style="background:none;border:none;color:#bbb;cursor:pointer;font-size:18px;">✕</button>`:''}
     </div>`).join('');
+  updateRoomInfoInSettings();
+  updateMyNameBadge();
 }
 function addUser(){
   const n=document.getElementById('newUserInput').value.trim();
   if(!n||users.includes(n)) return;
   users.push(n); document.getElementById('newUserInput').value='';
   renderUserList(); buildUserFilterChips(); buildDatalistOptions();
+  pushToFirebase();
 }
 function deleteUser(u){
   if(users.length<=1){alert('최소 1명은 있어야 해요');return;}
   users=users.filter(x=>x!==u); renderUserList(); buildUserFilterChips();
+  pushToFirebase();
 }
 
 function exportData(){
@@ -1427,7 +1583,7 @@ function importData(){
     r.onload=ev=>{
       try{ const data=JSON.parse(ev.target.result);
         events=data.events||[]; users=data.users||['나'];
-        renderAll(); alert('✅ 가져오기 성공!');
+        renderAll(); pushToFirebase(); alert('✅ 가져오기 성공!');
       }catch{ alert('파일 형식 오류'); }
     };
     r.readAsText(e.target.files[0]);
@@ -1720,6 +1876,7 @@ function confirmExcelImport(){
   buildUserFilterChips();
   buildDatalistOptions();
   closeXlModal();
+  pushToFirebase();
   alert(`✅ ${addedCount}개 일정을 가져왔어요!`);
 }
 
@@ -1783,28 +1940,56 @@ function renderList(){
 //  로그인 화면 (미리보기 모의)
 // ═══════════════════════════════════════════
 // 구글 로그인 완료 후 공통 처리
-function _onLoginSuccess(name){
-  currentUser = name;
+function _onLoginSuccess(){
   document.getElementById('loginScreen').style.display='none';
-  renderAll();
+
+  if(typeof window._fbSignIn === 'function'){
+    // Firebase(구글 로그인) 사용 중
+    const savedRoom = localStorage.getItem(ROOM_LS_KEY);
+    const savedUser = localStorage.getItem(USER_LS_KEY);
+
+    if(savedRoom && savedUser){
+      // 방 코드 + 이름 둘 다 저장됨 → 자동 재입장
+      currentUser = savedUser;
+      if(!users.includes(savedUser)) users.push(savedUser);
+      _setRoom(savedRoom);
+      _enterApp();
+    } else if(savedRoom){
+      // 방 코드만 있음 → 이름 선택 (기존 방 참여자 로드)
+      _pendingRoomCode = savedRoom;
+      (async ()=>{
+        let existingUsers = [];
+        if(typeof window._fbGetRoomData === 'function'){
+          try{ const d = await window._fbGetRoomData(savedRoom);
+               if(d && Array.isArray(d.users)) existingUsers = d.users; }catch(e){}
+        }
+        _showNameScreen(existingUsers, false);
+      })();
+    } else {
+      // 방 없음 → 방 선택 화면
+      _showRoomScreen();
+    }
+  } else {
+    // 로컬 모드 (Firebase 미설정)
+    const savedUser = localStorage.getItem(USER_LS_KEY);
+    if(savedUser){ currentUser=savedUser; _enterApp(); }
+    else { _pendingRoomCode=null; _showNameScreen(users, false); }
+  }
 }
 
 // 자동 로그인 콜백 (Firebase onAuthStateChanged 에서 호출)
 window._fbAutoLogin = function(user){
-  const name = user.displayName || user.email.split('@')[0] || '나';
-  _onLoginSuccess(name);
+  // Google 표시 이름은 참고용으로만 (실제 앱 내 이름은 별도 선택)
+  _onLoginSuccess();
 };
 
 async function loginWithGoogle(){
-  // Firebase가 초기화된 경우 → 실제 구글 로그인
   if(typeof window._fbSignIn === 'function'){
     try {
-      const result = await window._fbSignIn();
-      const user   = result.user;
-      const name   = user.displayName || user.email.split('@')[0] || '나';
-      _onLoginSuccess(name);
+      await window._fbSignIn();
+      // onAuthStateChanged → _fbAutoLogin → _onLoginSuccess() 로 이어짐
     } catch(err){
-      if(err.code === 'auth/popup-closed-by-user') return; // 사용자가 닫은 경우 무시
+      if(err.code === 'auth/popup-closed-by-user') return;
       if(err.code === 'auth/unauthorized-domain'){
         alert('⚠️ Firebase Console에서 이 도메인을 허용해야 해요.\nAuthentication → Authorized domains에\n"saehyehlee-art.github.io" 추가 후 다시 시도해주세요.');
         return;
@@ -1813,12 +1998,331 @@ async function loginWithGoogle(){
     }
     return;
   }
-  // Firebase 미설정 → 로컬 모드로 진입
-  _onLoginSuccess(users[0] || '나');
+  // Firebase 미설정 → 로컬 이름 선택으로
+  _onLoginSuccess();
 }
 
 function loginSkip(){
-  _onLoginSuccess(users[0] || '나');
+  // 건너뛰기: 이름 선택 화면으로 (방 없음)
+  document.getElementById('loginScreen').style.display='none';
+  _pendingRoomCode = null;
+  _showNameScreen(users, false);
+}
+
+function skipRoom(){
+  // 방 선택에서 "혼자 사용하기" → 이름 선택 (방 없음)
+  _pendingRoomCode = null;
+  _showNameScreen(users, false);
+}
+
+// ═══════════════════════════════════════════
+//  방(Room) 관리 - Firebase 실시간 동기화
+// ═══════════════════════════════════════════
+let currentRoomCode  = null;  // 현재 참여 중인 방 코드
+let _pendingRoomCode = null;  // 이름 선택 전 임시 저장 방 코드
+let _roomUnsubscribe = null;  // Firebase onValue 구독 해제 함수
+const ROOM_LS_KEY    = 'woorischedule_room';
+const USER_LS_KEY    = 'woorischedule_user';
+
+// ── 랜덤 6자리 방 코드 생성 (헷갈리는 문자 제외) ──
+function _generateRoomCode(){
+  const ch='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let c=''; for(let i=0;i<6;i++) c+=ch[Math.floor(Math.random()*ch.length)]; return c;
+}
+
+// ── events[] → Firebase 저장 포맷 {id: event} ──
+function _eventsToObj(arr){ const o={}; arr.forEach(ev=>{o[ev.id]=ev;}); return o; }
+
+// ── Firebase에 현재 events + users 동기화 ──
+function pushToFirebase(){
+  if(!currentRoomCode || typeof window._fbSyncRoom !== 'function') return;
+  window._fbSyncRoom(currentRoomCode, {
+    events: _eventsToObj(events),
+    users:  users
+  }).catch(e=>console.warn('Firebase 동기화 오류:', e));
+}
+
+// ── 방 화면 표시 ──
+function _showRoomScreen(){
+  document.getElementById('newRoomCode').textContent = _generateRoomCode();
+  const saved = localStorage.getItem(ROOM_LS_KEY);
+  if(saved) document.getElementById('joinRoomInput').value = saved;
+  document.getElementById('nameScreen').style.display = 'none';
+  document.getElementById('roomScreen').style.display = 'flex';
+}
+
+// ── 이름 선택 화면 표시 ──
+// existingUsers: 기존 방 참여자 목록 (없으면 [])
+// hasRoom: true면 뒤로가기 → 방 화면, false면 뒤로가기 → 로그인 화면
+function _showNameScreen(existingUsers, hasRoom){
+  const chipsWrap = document.getElementById('nameChipsWrap');
+  const chips     = document.getElementById('nameChips');
+  const title     = document.getElementById('nameScreenTitle');
+  const sub       = document.getElementById('nameScreenSub');
+  const inp       = document.getElementById('nameInput');
+  const btn       = document.getElementById('nameConfirmBtn');
+  const backBtn   = document.getElementById('nameBackBtn');
+
+  inp.value = '';
+  btn.disabled = true;
+
+  // 저장된 이름 미리 채우기
+  const savedName = localStorage.getItem('woorischedule_user');
+  if(savedName){ inp.value = savedName; btn.disabled = false; }
+
+  if(existingUsers && existingUsers.length > 0){
+    title.textContent = '👥 내 이름 선택';
+    sub.innerHTML = '방에 있는 이름을 선택하거나<br>새 이름을 직접 입력하세요';
+    chips.innerHTML = existingUsers.map(u =>
+      `<span class="user-chip-sel${u===savedName?' active':''}"
+        onclick="selectNameChip('${u}',this)">${u}</span>`
+    ).join('');
+    chipsWrap.style.display = 'block';
+  } else {
+    title.textContent = '✏️ 내 이름 입력';
+    sub.innerHTML = '방에서 사용할 내 이름을 입력해주세요';
+    chipsWrap.style.display = 'none';
+  }
+
+  // 뒤로가기 대상
+  backBtn.onclick = hasRoom ? goBackToRoomScreen : ()=>{
+    document.getElementById('nameScreen').style.display='none';
+    document.getElementById('loginScreen').style.display='flex';
+  };
+
+  document.getElementById('roomScreen').style.display = 'none';
+  document.getElementById('nameScreen').style.display  = 'flex';
+}
+
+// ── 이름 칩 선택 ──
+function selectNameChip(name, el){
+  document.querySelectorAll('#nameChips .user-chip-sel').forEach(c=>c.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('nameInput').value = name;
+  document.getElementById('nameConfirmBtn').disabled = false;
+}
+
+// ── 이름 입력 실시간 검증 ──
+function onNameInput(){
+  const v = document.getElementById('nameInput').value.trim();
+  document.getElementById('nameConfirmBtn').disabled = !v;
+  // 칩 선택 해제 (직접 입력 시)
+  const typed = document.getElementById('nameInput').value.trim();
+  document.querySelectorAll('#nameChips .user-chip-sel').forEach(c=>{
+    c.classList.toggle('active', c.textContent === typed);
+  });
+}
+
+// ── 이름 확정 → 앱 진입 ──
+function confirmName(){
+  const name = document.getElementById('nameInput').value.trim();
+  if(!name){ alert('이름을 입력해주세요.'); return; }
+
+  currentUser = name;
+  localStorage.setItem('woorischedule_user', name);
+
+  // 유저 목록에 없으면 추가
+  if(!users.includes(name)) users.push(name);
+
+  if(_pendingRoomCode){
+    _setRoom(_pendingRoomCode);
+  }
+  _enterApp();
+}
+
+// ── 방 화면으로 뒤로가기 ──
+function goBackToRoomScreen(){
+  document.getElementById('nameScreen').style.display = 'none';
+  _showRoomScreen();
+}
+
+// ── 방 코드 설정 + Firebase 실시간 구독 ──
+function _setRoom(code){
+  currentRoomCode = code;
+  localStorage.setItem(ROOM_LS_KEY, code);
+
+  if(_roomUnsubscribe){ _roomUnsubscribe(); _roomUnsubscribe=null; }
+  if(typeof window._fbListenRoom !== 'function') return;
+
+  _roomUnsubscribe = window._fbListenRoom(code, (data)=>{
+    if(!data) return;
+    // 서버 최신 데이터로 로컬 갱신
+    const incoming = Object.values(data.events || {});
+    events = incoming;
+    if(Array.isArray(data.users) && data.users.length) users = data.users;
+
+    // 앱 화면이 열려있을 때만 리렌더 + 배지 표시
+    const roomHidden  = document.getElementById('roomScreen').style.display  === 'none';
+    const loginHidden = document.getElementById('loginScreen').style.display === 'none';
+    if(roomHidden && loginHidden){
+      renderAll();
+      _showSyncBadge('🔄 동기화 완료');
+    }
+  });
+}
+
+// ── 새 방 만들기 ──
+async function createRoom(){
+  const code = document.getElementById('newRoomCode').textContent.trim();
+  if(!code || code.length!==6) return;
+
+  try{
+    // 코드 충돌 확인
+    if(typeof window._fbRoomExists === 'function'){
+      const exists = await window._fbRoomExists(code);
+      if(exists){
+        const nc = _generateRoomCode();
+        document.getElementById('newRoomCode').textContent = nc;
+        alert('⚠️ 코드가 이미 사용 중이에요.\n새 코드: '+nc);
+        return;
+      }
+    }
+    // 방 DB에 미리 생성 (이름 선택 전)
+    if(typeof window._fbCreateRoom === 'function'){
+      await window._fbCreateRoom(code, {
+        data:{ events:{}, users:[] }, created:Date.now()
+      });
+    }
+    // 이름 선택 화면으로 (기존 참여자 없음)
+    _pendingRoomCode = code;
+    _showNameScreen([], true);
+  } catch(e){ alert('방 만들기 실패: '+e.message); }
+}
+
+// ── 친구 방에 참여하기 ──
+async function joinRoom(){
+  const code = document.getElementById('joinRoomInput').value.trim().toUpperCase();
+  if(code.length!==6){ alert('6자리 코드를 입력해주세요.'); return; }
+
+  try{
+    if(typeof window._fbRoomExists === 'function'){
+      const exists = await window._fbRoomExists(code);
+      if(!exists){ alert('❌ 방을 찾을 수 없어요.\n코드: '+code); return; }
+    }
+    // 기존 방 데이터 읽어서 참여자 목록 가져오기
+    let existingUsers = [];
+    if(typeof window._fbGetRoomData === 'function'){
+      try{
+        const data = await window._fbGetRoomData(code);
+        if(data && Array.isArray(data.users)) existingUsers = data.users;
+      } catch(e){ /* 읽기 실패해도 계속 */ }
+    }
+    // 이름 선택 화면으로
+    _pendingRoomCode = code;
+    _showNameScreen(existingUsers, true);
+  } catch(e){ alert('방 참여 실패: '+e.message); }
+}
+
+// ── 방 나가기 ──
+function leaveRoom(){
+  if(!confirm('방을 나가면 이 기기에서는 로컬 모드로 전환돼요.\n계속할까요?')) return;
+  if(_roomUnsubscribe){ _roomUnsubscribe(); _roomUnsubscribe=null; }
+  currentRoomCode = null;
+  localStorage.removeItem(ROOM_LS_KEY);
+  updateRoomInfoInSettings();
+  alert('방에서 나왔어요. 재로그인하면 새 방을 만들거나 참여할 수 있어요.');
+}
+
+// ── 동기화 알림 배지 ──
+function _showSyncBadge(msg){
+  const badge = document.getElementById('syncBadge');
+  if(!badge) return;
+  badge.textContent = msg;
+  badge.classList.add('show');
+  clearTimeout(_showSyncBadge._t);
+  _showSyncBadge._t = setTimeout(()=>badge.classList.remove('show'), 2200);
+}
+
+// ── 앱 화면으로 진입 + 오늘 스크롤 ──
+function _enterApp(){
+  document.getElementById('roomScreen').style.display = 'none';
+  document.getElementById('nameScreen').style.display = 'none';
+  renderAll();
+  updateRoomInfoInSettings();
+  updateMyNameBadge();
+
+  setTimeout(()=>{
+    // 타임라인: 오늘 3일 전 행으로 스크롤
+    const t3 = new Date(_today);
+    t3.setDate(t3.getDate()-3);
+    const t3s = ds(t3);
+    const tlRows = document.querySelectorAll('#timeline-body .table-row');
+    let st = null;
+    tlRows.forEach(row=>{
+      if(st) return;
+      const cells = row.querySelectorAll('.td');
+      if(cells.length>=3){
+        const rd = `${cells[0].textContent.trim()}-${cells[1].textContent.trim().padStart(2,'0')}-${cells[2].textContent.trim().padStart(2,'0')}`;
+        if(rd>=t3s) st=row;
+      }
+    });
+    if(st) st.scrollIntoView({block:'start'});
+  }, 300);
+}
+
+// ── 설정 탭 내 이름 뱃지 업데이트 ──
+function updateMyNameBadge(){
+  const el = document.getElementById('myNameBadge');
+  if(el) el.textContent = currentUser || '(미설정)';
+}
+
+// ── 이름 변경 모달 열기 ──
+function openChangeNameModal(){
+  const chipsEl = document.getElementById('changeNameChips');
+  chipsEl.innerHTML = users.map(u =>
+    `<span class="user-chip-sel${u===currentUser?' active':''}"
+      onclick="selectChangeNameChip('${u}',this)">${u}</span>`
+  ).join('');
+  document.getElementById('changeNameInput').value = currentUser || '';
+  document.getElementById('changeNameConfirmBtn').disabled = false;
+  document.getElementById('changeNameModal').classList.add('open');
+}
+
+function selectChangeNameChip(name, el){
+  document.querySelectorAll('#changeNameChips .user-chip-sel').forEach(c=>c.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('changeNameInput').value = name;
+  document.getElementById('changeNameConfirmBtn').disabled = false;
+}
+
+function onChangeNameInput(){
+  const v = document.getElementById('changeNameInput').value.trim();
+  document.getElementById('changeNameConfirmBtn').disabled = !v;
+  document.querySelectorAll('#changeNameChips .user-chip-sel').forEach(c=>{
+    c.classList.toggle('active', c.textContent === v);
+  });
+}
+
+function confirmChangeName(){
+  const name = document.getElementById('changeNameInput').value.trim();
+  if(!name) return;
+  currentUser = name;
+  localStorage.setItem(USER_LS_KEY, name);
+  if(!users.includes(name)){ users.push(name); renderUserList(); buildUserFilterChips(); pushToFirebase(); }
+  updateMyNameBadge();
+  document.getElementById('changeNameModal').classList.remove('open');
+  // 현재 탭 리렌더 (수정 권한 아이콘 반영)
+  renderTimeline(); renderCalendar(); renderList();
+  alert(`✅ 이름이 "${name}"으로 변경됐어요!`);
+}
+
+// ── 설정 탭 방 정보 업데이트 ──
+function updateRoomInfoInSettings(){
+  const el = document.getElementById('currentRoomInfo');
+  if(!el) return;
+  if(currentRoomCode){
+    el.innerHTML=`
+      <div style="background:#F2F8EC;border-radius:8px;padding:12px;text-align:center;margin-bottom:10px;">
+        <div style="font-size:10px;color:#888;margin-bottom:4px;">현재 방 코드</div>
+        <div style="font-size:24px;font-weight:bold;letter-spacing:6px;color:#1E6614;font-family:monospace;">${currentRoomCode}</div>
+        <div style="font-size:10px;color:#aaa;margin-top:5px;">이 코드를 친구에게 알려주세요 📤<br>같은 코드로 입장하면 실시간으로 공유돼요</div>
+      </div>
+      <button onclick="leaveRoom()" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:8px;background:#fff;color:#999;font-size:11px;cursor:pointer;">방 나가기</button>`;
+  } else {
+    el.innerHTML=`
+      <p style="font-size:11px;color:#aaa;margin-bottom:8px;">현재 방에 참여하지 않았어요 (로컬 모드)</p>
+      <button onclick="_showRoomScreen()" style="width:100%;padding:9px;border:none;border-radius:8px;background:#5A9A32;color:#fff;font-size:12px;font-weight:bold;cursor:pointer;">방 만들기 / 참여하기</button>`;
+  }
 }
 
 // ═══════════════════════════════════════════
