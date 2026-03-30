@@ -759,12 +759,19 @@ let currentUser = '나'; // 로그인 시 설정됨 (미리보기 기본값)
 // ═══════════════════════════════════════════
 //  타임라인 표시 범위
 // ═══════════════════════════════════════════
-let timelineStartYear = 2026, timelineEndYear = 2027;
+// 오늘 기준으로 초기 범위 설정
+const _today = new Date();
+const _todayY = _today.getFullYear();
+const _todayM = _today.getMonth() + 1; // 1~12
+
+// 타임라인: 오늘 연도 ~ 내년 말
+let timelineStartYear = _todayY, timelineEndYear = _todayY + 1;
 
 // ═══════════════════════════════════════════
 //  리스트 표시 범위 (연+월)
 // ═══════════════════════════════════════════
-let listStartYear=2026, listStartMonth=1, listEndYear=2027, listEndMonth=12;
+// 리스트: 오늘이 포함된 월 ~ 내년 12월
+let listStartYear=_todayY, listStartMonth=_todayM, listEndYear=_todayY+1, listEndMonth=12;
 
 // ═══════════════════════════════════════════
 //  탭별 독립 필터 상태 (0:타임라인 1:달력 2:리스트)
@@ -995,7 +1002,7 @@ function renderTimeline(){
 // ═══════════════════════════════════════════
 //  달력 렌더링
 // ═══════════════════════════════════════════
-let calYear=2026, calMonth=0;
+let calYear=_todayY, calMonth=_today.getMonth(); // 오늘 포함된 월로 초기화
 const CAL_MAX_EVENTS=5; // 칸당 최대 보여줄 이벤트 수 (8px 폰트 기준)
 
 function renderCalendar(){
@@ -1451,58 +1458,56 @@ function _extractTime(text){
   return {time:'', title: s};
 }
 
+function _parseAndOpenXlModal(base64str){
+  try{
+    // ✅ base64 방식 — Android content:// URI / iOS KakaoTalk 모두 호환
+    const wb = XLSX.read(base64str, {type:'base64'});
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+    if(!rows.length){ alert('빈 파일이에요.'); return; }
+
+    // 헤더행 찾기 (연도/년/월/일 포함된 첫 행)
+    let hdrIdx = 0;
+    for(let i=0;i<Math.min(5,rows.length);i++){
+      const r = rows[i].map(v=>String(v));
+      if(r.some(v=>/^(연도|년도|년)$/.test(v)) && r.some(v=>/^월$/.test(v))){
+        hdrIdx = i; break;
+      }
+    }
+    const headers  = rows[hdrIdx].map(v=>String(v).trim());
+    const dataRows = rows.slice(hdrIdx+1);
+
+    // 헤더가 전혀 인식되지 않으면 파일 형식 오류
+    const hasDateCols = headers.some(h=>/^(연도|년도|년)$/.test(h)) && headers.some(h=>/^월$/.test(h));
+    if(!hasDateCols){
+      alert('❌ 엑셀 형식을 인식하지 못했어요.\n\n연도·월·일 컬럼이 있는 .xlsx 파일을 선택해주세요.\n\n📱 iOS: 카카오톡 파일 → 길게 누르기 → "파일 앱에 저장" 후 다시 시도해주세요.');
+      return;
+    }
+
+    _xlParsed = { headers, dataRows };
+    _buildXlModal(headers, dataRows);
+    document.getElementById('xlModal').classList.add('open');
+  }catch(err){
+    alert('엑셀 파일 읽기 실패: '+err.message+'\n\n📱 iOS: 카카오톡 파일은 "파일 앱에 저장" 후 선택해주세요.\n🤖 Android: 파일 관리자에서 Downloads 폴더의 .xlsx 파일을 선택해주세요.');
+  }
+}
+
 function handleExcelFile(input){
   const file = input.files[0];
   if(!file) return;
 
   const reader = new FileReader();
   reader.onload = function(e){
-    try{
-      const buffer = e.target.result;
-
-      // 🔍 xlsx 파일 여부 검증 — xlsx는 ZIP(PK) 포맷으로 시작
-      const magic = new Uint8Array(buffer, 0, 4);
-      const isZip  = magic[0]===0x50 && magic[1]===0x4B; // PK
-      const isJson = magic[0]===0x7B;                     // {
-
-      if(isJson){
-        alert('❌ JSON 백업 파일이에요.\n\n엑셀(.xlsx) 파일을 선택해주세요.\n(카카오톡에서 받은 파일은 먼저\n"파일 앱에 저장" 후 선택해주세요.)');
-        return;
-      }
-      if(!isZip){
-        alert('❌ 올바른 엑셀 파일이 아니에요.\n\n.xlsx 파일을 선택해주세요.\niOS: 카카오톡 파일 → 파일 앱에 저장 → 다시 시도');
-        return;
-      }
-
-      // ✅ Uint8Array로 변환 — iOS Safari 등 모바일 브라우저 호환
-      const data = new Uint8Array(buffer);
-      const wb = XLSX.read(data, {type:'array'});
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
-      if(!rows.length){ alert('빈 파일이에요.'); return; }
-
-      // 헤더행 찾기 (연도/년/월/일 포함된 첫 행)
-      let hdrIdx = 0;
-      for(let i=0;i<Math.min(5,rows.length);i++){
-        const r = rows[i].map(v=>String(v));
-        if(r.some(v=>/^(연도|년도|년)$/.test(v)) && r.some(v=>/^월$/.test(v))){
-          hdrIdx = i; break;
-        }
-      }
-      const headers = rows[hdrIdx].map(v=>String(v).trim());
-      const dataRows = rows.slice(hdrIdx+1);
-
-      _xlParsed = { headers, dataRows };
-      _buildXlModal(headers, dataRows);
-      document.getElementById('xlModal').classList.add('open');
-    }catch(err){
-      alert('엑셀 파일 읽기 실패: '+err.message+'\n\niOS: 카카오톡 파일은 파일 앱에 저장 후 선택해주세요.');
-    }
+    // data:...;base64,XXXX 에서 base64 부분만 추출
+    const b64 = e.target.result.split(',')[1];
+    if(!b64){ alert('파일을 읽을 수 없어요.'); return; }
+    _parseAndOpenXlModal(b64);
   };
   reader.onerror = function(){
-    alert('파일을 읽을 수 없어요.\n\n📱 iOS: 카카오톡에서 파일을 길게 눌러\n"파일 앱에 저장"한 뒤 다시 선택해주세요.');
+    alert('파일을 읽을 수 없어요.\n\n📱 iOS: 카카오톡에서 파일을 길게 눌러\n"파일 앱에 저장"한 뒤 다시 선택해주세요.\n🤖 Android: 파일 관리자 → Downloads에서 선택해주세요.');
   };
-  reader.readAsArrayBuffer(file);
+  // ✅ readAsDataURL: ArrayBuffer/Uint8Array 이슈 없이 Android·iOS 모두 안정적
+  reader.readAsDataURL(file);
 }
 
 // 컬럼 용도 옵션 목록
@@ -2026,7 +2031,8 @@ function initRangeSelects(){
     inp.addEventListener('blur',  ()=> { _rdBlurTimer=setTimeout(hideRangeDropdown,180); });
   });
 
-  const monthDefs = { lstStartMonth:1, lstEndMonth:12 };
+  const curM = new Date().getMonth() + 1;
+  const monthDefs = { lstStartMonth:curM, lstEndMonth:12 }; // 리스트 시작 월 = 오늘 월
   ['lstStartMonth','lstEndMonth'].forEach(id => {
     const inp = document.getElementById(id);
     if(!inp) return;
@@ -2038,10 +2044,51 @@ function initRangeSelects(){
 initRangeSelects();
 renderAll();
 updateAppbarForTab(0); // 초기 탭(타임라인)에 맞게 📅 버튼 표시
+
+// ── 앱 시작 시 오늘 기준 자동 스크롤 ──
 setTimeout(()=>{
-  const first=document.querySelector('#timeline-body .event-tag');
-  if(first) first.scrollIntoView({block:'center'});
-},150);
+  // 타임라인: 오늘 3일 전 행으로 스크롤
+  const target3 = new Date(_today);
+  target3.setDate(target3.getDate() - 3);
+  const target3Str = ds(target3);
+  // timeline-body 안의 행들을 순서대로 탐색해 3일 전 날짜와 가장 가까운 행 찾기
+  const rows = document.querySelectorAll('#timeline-body .table-row');
+  let scrollTarget = null;
+  // 날짜 셀(연도·월·일)로 날짜 문자열을 재구성해 매칭
+  rows.forEach(row => {
+    const cells = row.querySelectorAll('.td');
+    if(cells.length >= 3){
+      const y = cells[0].textContent.trim();
+      const m = String(cells[1].textContent.trim()).padStart(2,'0');
+      const d = String(cells[2].textContent.trim()).padStart(2,'0');
+      const rowDate = `${y}-${m}-${d}`;
+      if(!scrollTarget && rowDate >= target3Str) scrollTarget = row;
+    }
+  });
+  if(scrollTarget) scrollTarget.scrollIntoView({block:'start'});
+
+  // 리스트: 오늘 포함된 주 월요일로 스크롤 (이미 렌더된 리스트-date-header 중 오늘 이후 첫 항목)
+  const todayStr = ds(_today);
+  const listHeaders = document.querySelectorAll('#list-body .list-date-header');
+  let listTarget = null;
+  listHeaders.forEach(h => {
+    if(!listTarget){
+      // list-date-header 텍스트에서 날짜 추출 (형식: "2026년 3월 5일 (목)")
+      const m2 = h.textContent.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
+      if(m2){
+        const hDate = `${m2[1]}-${m2[2].padStart(2,'0')}-${m2[3].padStart(2,'0')}`;
+        // 오늘 포함 주의 월요일 = 오늘에서 요일만큼 빼기
+        const todayObj = new Date(todayStr+'T00:00');
+        const mondayOffset = (todayObj.getDay()+6)%7; // 0=월 기준
+        const monday = new Date(todayObj);
+        monday.setDate(monday.getDate() - mondayOffset);
+        const mondayStr = ds(monday);
+        if(hDate >= mondayStr) listTarget = h;
+      }
+    }
+  });
+  if(listTarget) listTarget.scrollIntoView({block:'start'});
+}, 200);
 </script>
 </body>
 </html>
