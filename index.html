@@ -69,8 +69,18 @@ const provider = new GoogleAuthProvider();
 // ── Auth ──────────────────────────────
 window._fbSignIn = () => signInWithPopup(auth, provider);
 
+// 현재 로그인된 구글 유저 (UID 접근용)
+window._fbGetCurrentUser = () => auth.currentUser;
+
 onAuthStateChanged(auth, user => {
-  if(user && typeof window._fbAutoLogin === 'function') window._fbAutoLogin(user);
+  if(user){
+    if(typeof window._fbAutoLogin === 'function'){
+      window._fbAutoLogin(user);
+    } else {
+      // _fbAutoLogin이 아직 정의 안 됐을 경우 대기
+      window._pendingAuthUser = user;
+    }
+  }
 });
 
 // ── Realtime Database helpers ─────────
@@ -109,6 +119,14 @@ window._fbUpdateNotif = (code, notifId, updates) => {
   return get(base).then(snap => {
     if(snap.exists()) set(base, {...snap.val(), ...updates});
   });
+};
+
+// ── 구글 계정 프로필 저장/불러오기 (UID 기반 — 방코드 자동입장용) ──
+window._fbSaveUserProfile = (uid, profile) =>
+  set(ref(db, `userProfiles/${uid}`), profile);
+window._fbGetUserProfile = async (uid) => {
+  const snap = await get(ref(db, `userProfiles/${uid}`));
+  return snap.val();
 };
 </script>
 <style>
@@ -832,11 +850,7 @@ html, body {
             <button onclick="exportExcel()" style="flex:1;padding:10px;border:1px solid #5A9A32;border-radius:10px;background:#fff;color:#5A9A32;font-size:12px;font-weight:bold;cursor:pointer;">📤 엑셀로 내보내기</button>
             <label for="xlFileInput" style="flex:1;padding:10px;border:none;border-radius:10px;background:#5A9A32;color:#fff;font-size:12px;font-weight:bold;cursor:pointer;text-align:center;display:flex;align-items:center;justify-content:center;">📂 엑셀 가져오기</label>
           </div>
-          <!-- iOS Safari: label for= 방식이 programmatic click보다 안정적 -->
-          <!-- accept에 MIME 타입 포함 → Android에서 파일 필터 정확도 향상 -->
-          <input type="file" id="xlFileInput"
-            accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
-            style="display:none;" onchange="handleExcelFile(this)">
+          <!-- 파일 입력은 body 하단에 전역 배치 (screen 안에 있으면 iOS/Android에서 클릭 안 될 수 있음) -->
           <p style="font-size:10px;color:#aaa;margin-top:8px;line-height:1.6;">
             📱 <b>iOS</b>: 카카오톡·메일로 받은 파일은 먼저 <b>파일 앱에 저장</b>한 뒤 선택해주세요.<br>
             🤖 <b>Android</b>: .json 파일이 아닌 <b>.xlsx 엑셀 파일</b>을 선택해주세요.
@@ -1297,8 +1311,8 @@ function buildDatalistOptions(){
   if(titleDl) titleDl.innerHTML = titleSet.map(t=>`<option value="${t}">`).join('');
 
   // 모달 시간: 직접 입력 방식 (datalist 없음)
-  // 특이사항
-  const holSet = new Set(Object.values(HOLIDAYS));
+  // 특이사항 (빌트인 + 커스텀 특이사항 합산)
+  const holSet = new Set([...Object.values(HOLIDAYS), ...Object.values(customHolidays)]);
   document.getElementById('listHoliday').innerHTML = [...holSet].map(h=>`<option value="${h}">`).join('');
 }
 
@@ -1364,7 +1378,8 @@ function visibleEventsForRow(date, dStr){
 
 function rowPassesFilter(date, dStr, visEvts){
   const wd=WD[date.getDay()];
-  const holiday=(HOLIDAYS[dStr]||'').toLowerCase();
+  const allH={...HOLIDAYS,...customHolidays};          // 커스텀 특이사항도 포함
+  const holiday=(allH[dStr]||'').toLowerCase();
   if(fYear    && String(date.getFullYear())!==fYear) return false;
   if(fMonth   && String(date.getMonth()+1)!==fMonth) return false;
   if(fDay     && String(date.getDate())!==fDay)      return false;
@@ -1751,7 +1766,7 @@ function deleteUser(u){
 
 function exportData(){
   const a=document.createElement('a');
-  a.href='data:text/json;charset=utf-8,'+encodeURIComponent(JSON.stringify({events,users},null,2));
+  a.href='data:text/json;charset=utf-8,'+encodeURIComponent(JSON.stringify({events,users,customHolidays},null,2));
   a.download='우리일정_백업.json'; a.click();
   alert('📤 파일 다운로드 완료! 친구에게 보내세요.');
 }
@@ -1882,18 +1897,22 @@ function exportExcel(){
   }
 }
 function importData(){
-  const input=document.createElement('input');
-  input.type='file'; input.accept='.json';
-  input.onchange=e=>{
-    const r=new FileReader();
-    r.onload=ev=>{
-      try{ const data=JSON.parse(ev.target.result);
-        events=data.events||[]; users=data.users||['나'];
-        renderAll(); pushToFirebase(); alert('✅ 가져오기 성공!');
-      }catch{ alert('파일 형식 오류'); }
-    };
-    r.readAsText(e.target.files[0]);
-  }; input.click();
+  const fi = document.getElementById('jsonFileInput');
+  if(fi){ fi.value=''; fi.click(); }
+}
+function handleJsonImport(input){
+  const file = input.files[0];
+  if(!file) return;
+  const r = new FileReader();
+  r.onload = ev => {
+    try{
+      const data = JSON.parse(ev.target.result);
+      events = data.events||[]; users = data.users||['나'];
+      customHolidays = (data.customHolidays && typeof data.customHolidays==='object') ? data.customHolidays : {};
+      renderAll(); pushToFirebase(); alert('✅ 가져오기 성공!');
+    }catch{ alert('파일 형식 오류'); }
+  };
+  r.readAsText(file);
 }
 
 // ═══════════════════════════════════════════
@@ -1921,26 +1940,45 @@ function _extractTime(text){
 }
 
 // 한 셀에 여러 이벤트가 있을 때 분리
-// 형식: "00:00 이벤트명" (줄바꿈으로 여러 개)
-// 반환: [{time, title}, ...] (항상 1개 이상)
+// 예: "(재택근무) 10:00 스타일러AS, 11:00 지선생님, 16:00 치과"
+//  → [{time:'',title:'(재택근무)'}, {time:'10:00',title:'스타일러AS'},
+//     {time:'11:00',title:'지선생님'}, {time:'16:00',title:'치과'}]
 function _splitMultiTimeEntries(text){
   if(!text) return [];
   const s = String(text).trim();
   if(!s) return [];
 
-  // 줄바꿈으로 먼저 분리
-  const lines = s.split(/[\n\r]+/).map(l=>l.trim()).filter(Boolean);
   const result = [];
-  for(const line of lines){
-    // "00:00 이벤트명" 형식 파싱
-    const m = line.match(/^(\d{1,2}:\d{2})\s+(.+)$/);
-    if(m){
-      result.push({time: m[1], title: m[2].trim()});
-    } else {
-      // 시간 없는 단순 텍스트
-      result.push({time:'', title: line});
-    }
+
+  // 줄바꿈이 있으면 줄바꿈 우선 분리 후 각 줄 재귀 처리
+  if(/[\n\r]/.test(s)){
+    const lines = s.split(/[\n\r]+/).map(l=>l.trim()).filter(Boolean);
+    lines.forEach(l => result.push(..._splitMultiTimeEntries(l)));
+    return result.length ? result : [{time:'', title:s}];
   }
+
+  // 한 줄 처리: HH:MM 패턴 위치를 모두 찾아 분리
+  const timeRe = /\d{1,2}:\d{2}/g;
+  const matches = [...s.matchAll(timeRe)];
+
+  if(matches.length === 0){
+    // 시간 없음 — 전체가 제목
+    return [{time:'', title: s}];
+  }
+
+  // 첫 번째 시간 이전 텍스트 (예: "(재택근무) ")
+  const prefix = s.slice(0, matches[0].index).replace(/[,，\s]+$/, '').trim();
+  if(prefix) result.push({time:'', title: prefix});
+
+  // 각 시간 세그먼트
+  for(let i = 0; i < matches.length; i++){
+    const time = matches[i][0];
+    const segStart = matches[i].index + time.length;
+    const segEnd   = i + 1 < matches.length ? matches[i+1].index : s.length;
+    const title = s.slice(segStart, segEnd).replace(/^[\s:]+/, '').replace(/[,，\s]+$/, '').trim();
+    if(title) result.push({time, title});
+  }
+
   return result.length ? result : [{time:'', title: s}];
 }
 
@@ -2314,11 +2352,33 @@ function _onLoginSuccess(){
 }
 
 // 자동 로그인 콜백 (Firebase onAuthStateChanged 에서 호출)
-window._fbAutoLogin = function(user){
+// 구글 계정 자동 로그인 콜백 — Firebase UID로 저장된 방+이름 불러오기
+window._fbAutoLogin = async function(user){
   // 이미 앱 화면이 열려 있으면 무시 (세션 중 재발동 방지)
   const loginEl = document.getElementById('loginScreen');
   if(!loginEl || loginEl.style.display === 'none') return;
-  // 로그인 화면이 실제로 보일 때만 처리
+
+  // ① Firebase UID 기반 프로필 로드 (방코드·이름 자동 복원)
+  if(user && user.uid && typeof window._fbGetUserProfile === 'function'){
+    try {
+      const profile = await window._fbGetUserProfile(user.uid);
+      if(profile){
+        // 저장된 방 목록 localStorage에 복원
+        if(Array.isArray(profile.rooms)){
+          profile.rooms.forEach(r => _addOrUpdateRoom(r.code, r.name));
+        }
+        // 마지막 방 코드 복원
+        if(profile.lastRoom){
+          localStorage.setItem(ROOM_LS_KEY, profile.lastRoom);
+        }
+        // 이름 복원
+        if(profile.userName){
+          localStorage.setItem(USER_LS_KEY, profile.userName);
+        }
+      }
+    } catch(e){ console.warn('프로필 로드 실패:', e); }
+  }
+
   _onLoginSuccess();
 };
 
@@ -2745,12 +2805,28 @@ function _showSyncBadge(msg){
 }
 
 // ── 앱 화면으로 진입 + 오늘 스크롤 ──
+// 구글 계정에 현재 방·이름 프로필 저장 (다음 로그인 시 자동 복원용)
+function _saveUserProfileToFirebase(){
+  if(typeof window._fbGetCurrentUser !== 'function') return;
+  const fbUser = window._fbGetCurrentUser();
+  if(!fbUser || !fbUser.uid) return;
+  if(typeof window._fbSaveUserProfile !== 'function') return;
+  window._fbSaveUserProfile(fbUser.uid, {
+    lastRoom: currentRoomCode || null,
+    userName: currentUser || null,
+    rooms: _getSavedRooms(),
+    updatedAt: Date.now()
+  }).catch(e => console.warn('프로필 저장 실패:', e));
+}
+
 function _enterApp(){
 ['appbar','content','tabbar'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='';});   document.getElementById('roomScreen').style.display = 'none';
   document.getElementById('nameScreen').style.display = 'none';
   renderAll();
   updateRoomInfoInSettings();
   updateMyNameBadge();
+  // 구글 계정에 현재 방+이름 저장
+  _saveUserProfileToFirebase();
 
   setTimeout(()=>{
     // 타임라인: 오늘 3일 전 행으로 스크롤
@@ -3101,10 +3177,9 @@ function _moveEventToDate(evId, newDate){
   pushToFirebase();
 }
 
-// ── 터치 드래그 (모바일 꾹 누르기) ──
-// 타임라인 탭은 3초, 나머지는 0.5초 (타임라인 스크롤과 구분)
+// ── 터치 드래그 (모바일 꾹 누르기) ── 달력·리스트 탭만 동작
 function _onTouchStart(evId, el, ev){
-  const delay = currentTabIdx === 0 ? 3000 : 500;
+  const delay = 500;
   _touchTimer = setTimeout(()=>{
     _isTouchDrag = true;
     _dragEvId = evId;
@@ -3134,10 +3209,10 @@ function _onTouchMove(ev){
 
   document.querySelectorAll('.drag-over').forEach(e=>e.classList.remove('drag-over'));
   if(!el) return;
-  const row = el.closest('.table-row[data-date]');
+  // 타임라인 행(.table-row)은 드래그 오버 대상에서 제외
   const calDay = el.closest('.cal-day[data-date]');
   const listHdr = el.closest('.list-date-header[data-date]');
-  const target = row||calDay||listHdr;
+  const target = calDay||listHdr;
   if(target) target.classList.add('drag-over');
 }
 
@@ -3154,10 +3229,10 @@ function _onTouchEnd(ev){
 
   document.querySelectorAll('.drag-over').forEach(e=>e.classList.remove('drag-over'));
   if(el && _dragEvId){
-    const row = el.closest('.table-row[data-date]');
+    // 타임라인 행(.table-row)은 드롭 대상에서 제외
     const calDay = el.closest('.cal-day[data-date]');
     const listHdr = el.closest('.list-date-header[data-date]');
-    const target = row||calDay||listHdr;
+    const target = calDay||listHdr;
     if(target){ _moveEventToDate(_dragEvId, target.dataset.date); }
   }
 
@@ -3166,14 +3241,8 @@ function _onTouchEnd(ev){
 }
 
 // ── 렌더링 후 드래그 이벤트 연결 ──
+// 타임라인 탭은 드래그앤드랍 미지원 (달력·리스트 탭만 지원)
 function _bindDragEvents(){
-  // PC drag — timeline event-tags
-  document.querySelectorAll('#timeline-body .event-tag[data-evid]').forEach(el=>{
-    const id = el.dataset.evid;
-    el.draggable = true;
-    el.addEventListener('dragstart', ev=>_onDragStart(id,el,ev));
-    el.addEventListener('dragend',   ()=>_onDragEnd(el));
-  });
   // PC drag — cal-events
   document.querySelectorAll('#cal-body .cal-event[data-evid]').forEach(el=>{
     const id = el.dataset.evid;
@@ -3189,14 +3258,7 @@ function _bindDragEvents(){
     el.addEventListener('dragend',   ()=>_onDragEnd(el));
   });
 
-  // PC drop targets — timeline rows
-  document.querySelectorAll('#timeline-body .table-row[data-date]').forEach(el=>{
-    const date = el.dataset.date;
-    el.addEventListener('dragover', ev=>_onDragOver(date,el,ev));
-    el.addEventListener('drop',     ev=>_onDrop(date,el,ev));
-    el.addEventListener('dragleave',()=>el.classList.remove('drag-over'));
-  });
-  // PC drop targets — cal-days
+  // PC drop targets — cal-days (타임라인 행은 드롭 대상에서 제외)
   document.querySelectorAll('#cal-body .cal-day[data-date]').forEach(el=>{
     const date = el.dataset.date;
     el.addEventListener('dragover', ev=>_onDragOver(date,el,ev));
@@ -3204,8 +3266,8 @@ function _bindDragEvents(){
     el.addEventListener('dragleave',()=>el.classList.remove('drag-over'));
   });
 
-  // Mobile touch drag — all event elements
-  document.querySelectorAll('.event-tag[data-evid], .cal-event[data-evid], .list-item[data-evid]').forEach(el=>{
+  // Mobile touch drag — 달력·리스트 탭만 (타임라인 event-tag 제외)
+  document.querySelectorAll('#cal-body .cal-event[data-evid], #list-body .list-item[data-evid]').forEach(el=>{
     const id = el.dataset.evid;
     el.addEventListener('touchstart', ev=>_onTouchStart(id,el,ev), {passive:true});
     el.addEventListener('touchcancel',()=>{ clearTimeout(_touchTimer); _isTouchDrag=false; if(_dragSrcEl)_dragSrcEl.classList.remove('dragging'); });
@@ -3295,6 +3357,14 @@ initRangeSelects();
 renderAll();
 updateAppbarForTab(0); // 초기 탭(타임라인)에 맞게 📅 버튼 표시
 
+// Firebase 모듈이 이 스크립트보다 먼저 실행되어 pendingAuthUser가 쌓인 경우 처리
+setTimeout(()=>{
+  if(window._pendingAuthUser && typeof window._fbAutoLogin === 'function'){
+    window._fbAutoLogin(window._pendingAuthUser);
+    window._pendingAuthUser = null;
+  }
+}, 200);
+
 // ── 앱 시작 시 오늘 기준 자동 스크롤 ──
 setTimeout(()=>{
   // 타임라인: 오늘 3일 전 행으로 스크롤
@@ -3376,6 +3446,15 @@ setTimeout(()=>{
 
 <!-- 드래그 이동 고스트 요소 -->
 <div id="drag-ghost"></div>
+
+<!-- ★ 엑셀 파일 입력 — screen div 밖 body 최하단에 배치해야 iOS/Android에서 정상 동작 -->
+<input type="file" id="xlFileInput"
+  accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+  style="position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;top:0;left:0;"
+  onchange="handleExcelFile(this)">
+
+<!-- JSON 가져오기 파일 입력 (기존) -->
+<input type="file" id="jsonFileInput" accept=".json" style="position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;top:0;left:0;" onchange="handleJsonImport(this)">
 
 </body>
 </html>
