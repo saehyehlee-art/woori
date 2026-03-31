@@ -239,23 +239,15 @@ html, body {
   padding:6px 4px 3px; border-bottom:1px solid #e0e0e0; margin-bottom:4px; margin-top:8px;
 }
 .list-date-header:first-child { margin-top:0; }
-.list-item {
-  display:flex; align-items:center; gap:6px;
-  background:#fff; border-radius:8px; padding:7px 10px; margin-bottom:4px;
-  box-shadow:0 1px 3px rgba(0,0,0,.05); cursor:pointer;
-  transition:.1s; overflow:hidden;
-}
+.list-item { display:flex; align-items:flex-start; gap:6px; background:#fff; border-radius:8px; padding:7px 10px; margin-bottom:4px; box-shadow:0 1px 3px rgba(0,0,0,.05); cursor:pointer; transition:.1s; overflow:hidden; flex-wrap:wrap; }
 .list-item:hover { background:#f8f8f8; }
 .list-clover {
   display:inline-block; font-size:15px;
   flex-shrink:0; line-height:1;
 }
-.list-item-time { font-size:11px; color:#888; white-space:nowrap; flex-shrink:0; }
-.list-item-user {
-  display:inline-block; font-size:10px; border-radius:10px;
-  padding:1px 7px; white-space:nowrap; flex-shrink:0;
-}
-.list-item-title { font-size:12px; font-weight:500; color:#222; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.list-item-time { font-size:11px; color:#888; white-space:nowrap; flex-shrink:0; min-width:44px; }
+.list-item-user { font-size:10px; border-radius:10px; padding:1px 7px; white-space:nowrap; flex-shrink:0; min-width:60px; text-align:center; }
+.list-item-title { font-size:12px; font-weight:500; color:#222; flex:1; white-space:normal; word-break:break-word; overflow-wrap:anywhere; }
 .list-empty { text-align:center; padding:40px; color:#aaa; font-size:13px; }
 
 /* ── 리스트 기간 패널 ── */
@@ -456,6 +448,35 @@ html, body {
 .cbtn.cancel  { background:#f5f5f5; color:#555; }
 .cbtn.primary { background:#6BA840; color:#fff; }
 .cbtn.danger  { background:#D32F2F; color:#fff; }
+
+/* ── 멀티 방 리스트 ── */
+.saved-room-btn {
+  width:100%;
+  text-align:left;
+  padding:12px 14px;
+  margin-bottom:8px;
+  background:rgba(255,255,255,.96);
+  border:none;
+  border-radius:12px;
+  cursor:pointer;
+  transition:.1s;
+}
+.saved-room-btn:hover { background:rgba(255,255,255,.88); }
+.saved-room-name { font-size:14px; font-weight:bold; color:#1E6614; }
+.saved-room-code { font-size:10px; color:#aaa; letter-spacing:2px; font-family:monospace; margin-top:2px; }
+
+/* + 버튼 선택 모달 */
+.add-choice-modal { /* uses confirm-overlay/confirm-box */ }
+
+/* 특이사항 모달 */
+.holiday-modal { /* uses modal-overlay/modal */ }
+
+/* 타임라인 오늘 행 */
+.table-row.today-row .td { font-weight:bold; }
+
+/* 달력 오늘 날짜 */
+.cal-day.today-day { border:2.5px solid #5BAD42 !important; }
+
 </style>
 </head>
 <body>
@@ -486,29 +507,28 @@ html, body {
   <div class="room-screen" id="roomScreen" style="display:none;">
     <div class="room-logo">🍀</div>
     <div class="room-title">우리일정</div>
-    <div class="room-sub">함께 쓸 방을 만들거나<br>친구의 방에 참여해요</div>
-
-    <!-- 새 방 만들기 -->
-    <div class="room-card">
+    <div class="room-sub">어느 방으로 들어갈까요?</div>
+    <div id="savedRoomList" style="width:100%;"></div>
+    <div class="room-card" id="newRoomOptionsCard" style="display:none;">
       <div class="room-card-title">✨ 새 방 만들기</div>
       <div class="room-code-hint">아래 코드를 친구에게 알려주세요</div>
       <div class="room-code-display" id="newRoomCode">------</div>
+      <div class="room-code-hint" style="margin-top:8px;margin-bottom:4px;text-align:left;">방 이름</div>
+      <input class="room-input" id="newRoomNameInput" placeholder="예: 우리 방, 가족 방" maxlength="20"
+        style="font-size:15px;letter-spacing:0;text-transform:none;font-family:inherit;margin-bottom:4px;">
       <button class="room-btn room-btn-primary" onclick="createRoom()">🏠 이 방 코드로 시작하기</button>
+      <div style="margin-top:16px;padding-top:12px;border-top:1px solid #eee;">
+        <div class="room-card-title">🔗 방 코드로 참여하기</div>
+        <div class="room-code-hint" style="margin-bottom:4px;text-align:left;">친구에게 받은 6자리 코드</div>
+        <input class="room-input" id="joinRoomInput" placeholder="XXXXXX" maxlength="6"
+          oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'')">
+        <div class="room-code-hint" style="margin-top:8px;margin-bottom:4px;text-align:left;">이 방 이름</div>
+        <input class="room-input" id="joinRoomNameInput" placeholder="예: 세혜&지석 방" maxlength="20"
+          style="font-size:15px;letter-spacing:0;text-transform:none;font-family:inherit;margin-bottom:4px;">
+        <button class="room-btn room-btn-primary" onclick="joinRoom()">📲 방에 참여하기</button>
+      </div>
     </div>
-
-    <!-- 친구 방에 참여하기 -->
-    <div class="room-card">
-      <div class="room-card-title">🔗 친구 방에 참여하기</div>
-      <div class="room-code-hint" style="margin-bottom:6px;">친구에게 받은 6자리 코드를 입력하세요</div>
-      <input class="room-input" id="joinRoomInput" placeholder="XXXXXX" maxlength="6"
-        oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'')">
-      <button class="room-btn room-btn-primary" onclick="joinRoom()">📲 방에 참여하기</button>
-    </div>
-
-    <!-- 방 없이 사용 -->
-    <button class="room-btn room-btn-secondary" onclick="skipRoom()" style="margin-top:4px;">
-      혼자 사용하기 (동기화 없음)
-    </button>
+    <button class="room-btn room-btn-secondary" onclick="skipRoom()" style="margin-top:4px;">혼자 사용하기 (동기화 없음)</button>
   </div>
 
   <!-- 이름 선택 화면 -->
@@ -550,7 +570,10 @@ html, body {
       <button class="appbar-btn" id="filterBtn" onclick="toggleFilter()" title="검색/필터">🔍</button>
       <button class="appbar-btn" id="yearRangeBtn"  onclick="toggleYearRange()"  title="기간 설정" style="display:none;">📅</button>
       <button class="appbar-btn" id="listRangeBtn"  onclick="toggleListRange()"  title="기간 설정" style="display:none;">📅</button>
-      <button class="appbar-btn" id="addBtn" onclick="openAddModal()" title="일정 추가">＋</button>
+      <button class="appbar-btn" id="todayBtnTimeline" onclick="scrollToTodayTimeline()" style="display:none;">🎁</button>
+      <button class="appbar-btn" id="todayBtnCalendar" onclick="goToTodayCalendar()" style="display:none;">🎁</button>
+      <button class="appbar-btn" id="todayBtnList" onclick="scrollToTodayList()" style="display:none;">🎁</button>
+      <button class="appbar-btn" id="addBtn" onclick="openAddChoice()" title="일정 추가">＋</button>
     </div>
   </div>
 
@@ -900,6 +923,66 @@ const HOLIDAYS = {
   '2027-10-09':'한글날','2027-12-25':'성탄절',
 };
 
+// 특이사항 (사용자 정의 휴일)
+let customHolidays = {};
+
+// ═══════════════════════════════════════════
+//  방(Room) 시스템 - 멀티 방 지원
+// ═══════════════════════════════════════════
+const ROOMS_LS_KEY = 'woorischedule_rooms';
+const ROOM_LS_KEY  = 'woorischedule_room';  // 마지막 사용 방 기록용 (역호환)
+const USER_LS_KEY  = 'woorischedule_user';
+
+function _getSavedRooms(){
+  try{ return JSON.parse(localStorage.getItem(ROOMS_LS_KEY))||[]; }catch{ return []; }
+}
+
+function _saveRooms(rooms){
+  localStorage.setItem(ROOMS_LS_KEY, JSON.stringify(rooms));
+}
+
+function _addOrUpdateRoom(code, name){
+  const rooms = _getSavedRooms();
+  const ex = rooms.find(r=>r.code===code);
+  if(ex){ ex.name=name; }
+  else { rooms.push({code,name}); }
+  _saveRooms(rooms);
+  localStorage.setItem(ROOM_LS_KEY, code);
+}
+
+async function enterSavedRoom(code){
+  _pendingRoomCode = code;
+  let existingUsers=[];
+  if(typeof window._fbGetRoomData==='function'){
+    try{const d=await window._fbGetRoomData(code);if(d&&Array.isArray(d.users))existingUsers=d.users;}catch(e){}
+  }
+  _showNameScreen(existingUsers, true);
+}
+
+async function switchToRoom(code){
+  _pendingRoomCode = code;
+  let existingUsers=[];
+  if(typeof window._fbGetRoomData==='function'){
+    try{const d=await window._fbGetRoomData(code);if(d&&Array.isArray(d.users))existingUsers=d.users;}catch(e){}
+  }
+  ['appbar','content','tabbar','filterPanel','yearRangePanel','listRangePanel'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});
+  _showNameScreen(existingUsers, true);
+}
+
+function addNewRoomFromSettings(){
+  if(_roomUnsubscribe){_roomUnsubscribe();_roomUnsubscribe=null;}
+  currentRoomCode=null;
+  ['appbar','content','tabbar','filterPanel','yearRangePanel','listRangePanel'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});
+  _showRoomScreen();
+  showNewRoomOptions();
+}
+
+function deleteRoomFromList(code){
+  if(!confirm('이 방을 목록에서 삭제할까요?')) return;
+  _saveRooms(_getSavedRooms().filter(r=>r.code!==code));
+  updateRoomInfoInSettings();
+}
+
 // ═══════════════════════════════════════════
 //  현재 로그인 유저 (수정 권한 판단용)
 // ═══════════════════════════════════════════
@@ -1002,6 +1085,85 @@ function getUserPalette(userLabel){
 const WD = ['일','월','화','수','목','금','토']; // 0=일
 function pad(n){ return String(n).padStart(2,'0'); }
 function ds(d){ return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
+
+// ═══════════════════════════════════════════
+//  + 버튼 선택
+// ═══════════════════════════════════════════
+function openAddChoice(){
+  document.getElementById('addChoiceModal').classList.add('open');
+}
+
+// ═══════════════════════════════════════════
+//  특이사항(커스텀 휴일) 모달
+// ═══════════════════════════════════════════
+function openHolidayModal(dateStr){
+  document.getElementById('holidayModalTitle').textContent='📌 특이사항 추가';
+  const today=new Date();
+  document.getElementById('hYear').value=today.getFullYear();
+  document.getElementById('hMonth').value=today.getMonth()+1;
+  document.getElementById('hDay').value=today.getDate();
+  document.getElementById('hTitle').value='';
+  document.getElementById('hEditKey').value='';
+  if(dateStr){
+    const [y,m,d]=dateStr.split('-').map(Number);
+    document.getElementById('hYear').value=y;
+    document.getElementById('hMonth').value=m;
+    document.getElementById('hDay').value=d;
+  }
+  document.getElementById('holidayModal').classList.add('open');
+}
+
+function closeHolidayModal(){
+  document.getElementById('holidayModal').classList.remove('open');
+}
+
+function saveHoliday(){
+  const y=parseInt(document.getElementById('hYear').value);
+  const m=parseInt(document.getElementById('hMonth').value);
+  const d=parseInt(document.getElementById('hDay').value);
+  const title=document.getElementById('hTitle').value.trim();
+  const editKey=document.getElementById('hEditKey').value;
+  if(!title){alert('내용을 입력해주세요!');return;}
+  if(!y||!m||!d){alert('날짜를 입력해주세요!');return;}
+  const key=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+  if(editKey && editKey!==key) delete customHolidays[editKey];
+  customHolidays[key]=title;
+  closeHolidayModal();
+  pushToFirebase();
+  renderTimeline();renderCalendar();renderList();
+}
+
+// ═══════════════════════════════════════════
+//  이벤트 뷰 팝업 (모든 이벤트용)
+// ═══════════════════════════════════════════
+function showEventView(id, e){
+  if(e) e.stopPropagation();
+  const evt=events.find(x=>x.id===id);
+  if(!evt) return;
+  const pal=getUserPalette(evt.userLabel);
+  const d=new Date(evt.date+'T00:00');
+  const wd=WD[d.getDay()];
+  const dateStr=`${d.getFullYear()}.${pad(d.getMonth()+1)}.${pad(d.getDate())} (${wd})`;
+  const allH={...HOLIDAYS,...customHolidays};
+  const holiday=allH[evt.date]?` · ${allH[evt.date]}`:'';
+  document.getElementById('evViewTag').textContent=evt.userLabel;
+  document.getElementById('evViewTag').style=`background:${pal.bg};color:${pal.text};border:1px solid ${pal.border};`;
+  document.getElementById('evViewTitle').textContent=evt.title;
+  document.getElementById('evViewLine').textContent=`${dateStr}${holiday}${evt.time?' · '+evt.time:''}`;
+  document.getElementById('evViewEditId').value=id;
+  document.getElementById('eventViewOverlay').classList.add('open');
+}
+
+function closeEventView(){
+  document.getElementById('eventViewOverlay').classList.remove('open');
+}
+
+function editFromView(){
+  const id=document.getElementById('evViewEditId').value;
+  closeEventView();
+  fillEditModal(id, false);
+}
+
 function uuid(){ return 'id'+Math.random().toString(36).slice(2)+Date.now(); }
 
 function eventsForDate(dStr){
@@ -1155,7 +1317,9 @@ let calYear=_todayY, calMonth=_today.getMonth(); // 오늘 포함된 월로 초�
 const CAL_MAX_EVENTS=5; // 칸당 최대 보여줄 이벤트 수 (8px 폰트 기준)
 
 function renderCalendar(){
-  document.getElementById('cal-title').textContent=`${calYear}년 ${calMonth+1}월`;
+const allH={...HOLIDAYS,...customHolidays};
+  const todayStr=ds(_today);
+    document.getElementById('cal-title').textContent=`${calYear}년 ${calMonth+1}월`;
 
   // 요일 헤더
   document.getElementById('cal-weekdays').innerHTML=
@@ -1176,7 +1340,7 @@ function renderCalendar(){
     const wd=(d.getDay()+6)%7; // 0=월 … 6=일
     const isRed  = wd===6;  // 일요일
     const isBlue = wd===5;  // 토요일
-    const isHoliday=!!HOLIDAYS[dStr];
+    const isHoliday=!!allH[dStr];
     const numColor = (isRed||isHoliday) ? '#D32F2F' : isBlue ? '#1977CC' : '#212121';
 
     const dayEvts=eventsForDate(dStr);
@@ -1193,9 +1357,9 @@ function renderCalendar(){
     const moreHtml = '';
 
     // 공휴일 이름
-    const holName = HOLIDAYS[dStr]||'';
+    const holName = allH[dStr]||'';
 
-    html+=`<div class="cal-day${hasEvts?' has-events':''}${isHoliday?' holiday-day':''}">
+    html+=`<div class="cal-day${dStr===todayStr?' today-day':''}${hasEvts?' has-events':''}${isHoliday?' holiday-day':''}">
       <div class="cal-day-header">
         <span class="cal-day-num" style="color:${numColor}">${day}</span>
         ${holName?`<span class="cal-holiday-name">${holName}</span>`:''}
@@ -1884,7 +2048,9 @@ function confirmExcelImport(){
 //  리스트 렌더링
 // ═══════════════════════════════════════════
 function renderList(){
-  const wrap=document.getElementById('list-body');
+const allH={...HOLIDAYS,...customHolidays};
+  const todayStr=ds(_today);
+    const wrap=document.getElementById('list-body');
   if(!wrap) return;
 
   const start=new Date(listStartYear, listStartMonth-1, 1);
@@ -1915,7 +2081,7 @@ function renderList(){
     const isBlue=date.getDay()===6&&!isHoliday;
     const dateColor=isRed?'#D32F2F':isBlue?'#1977CC':'#5A9A32';
     html+=`<div class="list-date-header" style="color:${dateColor}">
-      ${date.getFullYear()}년 ${date.getMonth()+1}월 ${date.getDate()}일 (${wd})${holStr}
+      ${date.getFullYear()}년 ${date.getMonth()+1}월 ${date.getDate()}일 (${wd})${holStr}${dStr===todayStr?' <span style="color:#F4A836;font-size:12px;">Today★</span>':''}
     </div>`;
     for(const e of evts){
       const pal=getUserPalette(e.userLabel);
@@ -1942,38 +2108,31 @@ function renderList(){
 // 구글 로그인 완료 후 공통 처리
 function _onLoginSuccess(){
   document.getElementById('loginScreen').style.display='none';
-
-  if(typeof window._fbSignIn === 'function'){
-    // Firebase(구글 로그인) 사용 중
-    const savedRoom = localStorage.getItem(ROOM_LS_KEY);
-    const savedUser = localStorage.getItem(USER_LS_KEY);
-
-    if(savedRoom && savedUser){
-      // 방 코드 + 이름 둘 다 저장됨 → 자동 재입장
-      currentUser = savedUser;
+  if(typeof window._fbSignIn==='function'){
+    const savedUser=localStorage.getItem(USER_LS_KEY);
+    const rooms=_getSavedRooms();
+    const lastCode=localStorage.getItem(ROOM_LS_KEY);
+    if(rooms.length>0 && savedUser){
+      currentUser=savedUser;
       if(!users.includes(savedUser)) users.push(savedUser);
-      _setRoom(savedRoom);
+      const code=lastCode||rooms[0].code;
+      _setRoom(code);
       _enterApp();
-    } else if(savedRoom){
-      // 방 코드만 있음 → 이름 선택 (기존 방 참여자 로드)
-      _pendingRoomCode = savedRoom;
-      (async ()=>{
-        let existingUsers = [];
-        if(typeof window._fbGetRoomData === 'function'){
-          try{ const d = await window._fbGetRoomData(savedRoom);
-               if(d && Array.isArray(d.users)) existingUsers = d.users; }catch(e){}
-        }
-        _showNameScreen(existingUsers, false);
+    } else if(rooms.length>0){
+      const code=lastCode||rooms[0].code;
+      _pendingRoomCode=code;
+      (async()=>{
+        let eu=[];
+        if(typeof window._fbGetRoomData==='function'){try{const d=await window._fbGetRoomData(code);if(d&&Array.isArray(d.users))eu=d.users;}catch(e){}}
+        _showNameScreen(eu,false);
       })();
     } else {
-      // 방 없음 → 방 선택 화면
       _showRoomScreen();
     }
   } else {
-    // 로컬 모드 (Firebase 미설정)
-    const savedUser = localStorage.getItem(USER_LS_KEY);
-    if(savedUser){ currentUser=savedUser; _enterApp(); }
-    else { _pendingRoomCode=null; _showNameScreen(users, false); }
+    const savedUser=localStorage.getItem(USER_LS_KEY);
+    if(savedUser){currentUser=savedUser;_enterApp();}
+    else{_pendingRoomCode=null;_showNameScreen(users,false);}
   }
 }
 
@@ -2021,8 +2180,7 @@ function skipRoom(){
 let currentRoomCode  = null;  // 현재 참여 중인 방 코드
 let _pendingRoomCode = null;  // 이름 선택 전 임시 저장 방 코드
 let _roomUnsubscribe = null;  // Firebase onValue 구독 해제 함수
-const ROOM_LS_KEY    = 'woorischedule_room';
-const USER_LS_KEY    = 'woorischedule_user';
+// ROOM_LS_KEY, USER_LS_KEY는 위에서 이미 선언됨
 
 // ── 랜덤 6자리 방 코드 생성 (헷갈리는 문자 제외) ──
 function _generateRoomCode(){
@@ -2038,17 +2196,38 @@ function pushToFirebase(){
   if(!currentRoomCode || typeof window._fbSyncRoom !== 'function') return;
   window._fbSyncRoom(currentRoomCode, {
     events: _eventsToObj(events),
-    users:  users
+    users: users,
+    customHolidays: customHolidays
   }).catch(e=>console.warn('Firebase 동기화 오류:', e));
 }
 
 // ── 방 화면 표시 ──
 function _showRoomScreen(){
   document.getElementById('newRoomCode').textContent = _generateRoomCode();
-  const saved = localStorage.getItem(ROOM_LS_KEY);
-  if(saved) document.getElementById('joinRoomInput').value = saved;
   document.getElementById('nameScreen').style.display = 'none';
+  
+  const rooms = _getSavedRooms();
+  const listEl = document.getElementById('savedRoomList');
+  
+  if(rooms.length > 0){
+    listEl.innerHTML = rooms.map(r=>`
+      <button onclick="enterSavedRoom('${r.code}')" style="width:100%;text-align:left;padding:12px 14px;margin-bottom:8px;background:rgba(255,255,255,.96);border:none;border-radius:12px;cursor:pointer;">
+        <div style="font-size:14px;font-weight:bold;color:#1E6614;">${r.name}</div>
+        <div style="font-size:10px;color:#aaa;letter-spacing:2px;font-family:monospace;margin-top:2px;">${r.code}</div>
+      </button>`).join('') +
+      `<button onclick="showNewRoomOptions()" class="room-btn room-btn-secondary" style="margin-top:4px;">＋ 새 방 만들기 / 다른 방 참여</button>`;
+    document.getElementById('newRoomOptionsCard').style.display='none';
+  } else {
+    listEl.innerHTML='';
+    showNewRoomOptions();
+  }
   document.getElementById('roomScreen').style.display = 'flex';
+}
+
+function showNewRoomOptions(){
+  document.getElementById('savedRoomList').innerHTML='';
+  document.getElementById('newRoomOptionsCard').style.display='block';
+  document.getElementById('newRoomCode').textContent = _generateRoomCode();
 }
 
 // ── 이름 선택 화면 표시 ──
@@ -2150,6 +2329,7 @@ function _setRoom(code){
     const incoming = Object.values(data.events || {});
     events = incoming;
     if(Array.isArray(data.users) && data.users.length) users = data.users;
+    if(data.customHolidays && typeof data.customHolidays==='object') customHolidays=data.customHolidays;
 
     // 앱 화면이 열려있을 때만 리렌더 + 배지 표시
     const roomHidden  = document.getElementById('roomScreen').style.display  === 'none';
@@ -2185,6 +2365,8 @@ async function createRoom(){
     }
     // 이름 선택 화면으로 (기존 참여자 없음)
     _pendingRoomCode = code;
+    const roomName = document.getElementById('newRoomNameInput').value.trim() || '새 방';
+    _addOrUpdateRoom(code, roomName);
     _showNameScreen([], true);
   } catch(e){ alert('방 만들기 실패: '+e.message); }
 }
@@ -2209,18 +2391,20 @@ async function joinRoom(){
     }
     // 이름 선택 화면으로
     _pendingRoomCode = code;
+    const roomName = document.getElementById('joinRoomNameInput').value.trim() || code;
+    _addOrUpdateRoom(code, roomName);
     _showNameScreen(existingUsers, true);
   } catch(e){ alert('방 참여 실패: '+e.message); }
 }
 
 // ── 방 나가기 ──
 function leaveRoom(){
-  if(!confirm('방을 나가면 이 기기에서는 로컬 모드로 전환돼요.\n계속할까요?')) return;
-  if(_roomUnsubscribe){ _roomUnsubscribe(); _roomUnsubscribe=null; }
-  currentRoomCode = null;
+  if(!confirm('이 방을 목록에서 삭제할까요?')) return;
+  if(_roomUnsubscribe){_roomUnsubscribe();_roomUnsubscribe=null;}
+  _saveRooms(_getSavedRooms().filter(r=>r.code!==currentRoomCode));
+  currentRoomCode=null;
   localStorage.removeItem(ROOM_LS_KEY);
   updateRoomInfoInSettings();
-  alert('방에서 나왔어요. 재로그인하면 새 방을 만들거나 참여할 수 있어요.');
 }
 
 // ── 동기화 알림 배지 ──
@@ -2235,7 +2419,7 @@ function _showSyncBadge(msg){
 
 // ── 앱 화면으로 진입 + 오늘 스크롤 ──
 function _enterApp(){
-  document.getElementById('roomScreen').style.display = 'none';
+['appbar','content','tabbar'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='';});   document.getElementById('roomScreen').style.display = 'none';
   document.getElementById('nameScreen').style.display = 'none';
   renderAll();
   updateRoomInfoInSettings();
@@ -2261,6 +2445,31 @@ function _enterApp(){
 }
 
 // ── 설정 탭 내 이름 뱃지 업데이트 ──
+
+function scrollToTodayTimeline(){
+  const t3=new Date(_today); t3.setDate(t3.getDate()-3); const t3s=ds(t3);
+  const rows=document.querySelectorAll('#timeline-body .table-row'); let st=null;
+  rows.forEach(row=>{if(st)return;const cells=row.querySelectorAll('.td');if(cells.length>=3){const rd=`${cells[0].textContent.trim()}-${cells[1].textContent.trim().padStart(2,'0')}-${cells[2].textContent.trim().padStart(2,'0')}`;if(rd>=t3s)st=row;}});
+  if(st)st.scrollIntoView({block:'start'});
+}
+
+function goToTodayCalendar(){
+  calYear=_todayY; calMonth=_today.getMonth(); renderCalendar();
+}
+
+function scrollToTodayList(){
+  const todayStr=ds(_today);
+  const headers=document.querySelectorAll('#list-body .list-date-header');
+  let target=null;
+  headers.forEach(h=>{
+    if(!target){
+      const m=h.textContent.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
+      if(m){const hd=`${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;if(hd>=todayStr)target=h;}
+    }
+  });
+  if(target)target.scrollIntoView({block:'start'});
+}
+
 function updateMyNameBadge(){
   const el = document.getElementById('myNameBadge');
   if(el) el.textContent = currentUser || '(미설정)';
@@ -2387,30 +2596,26 @@ function updateListRange(){ applyListRange(); }
 
 // ── 탭별 앱바 버튼 표시/숨김 ──
 function updateAppbarForTab(idx){
-  const fb  = document.getElementById('filterBtn');
-  const yrb = document.getElementById('yearRangeBtn');
-  const lrb = document.getElementById('listRangeBtn');
-  const ab  = document.getElementById('addBtn');
-  const fp  = document.getElementById('filterPanel');
-  const yrp = document.getElementById('yearRangePanel');
-  const lrp = document.getElementById('listRangePanel');
+  const fb=document.getElementById('filterBtn');
+  const yrb=document.getElementById('yearRangeBtn');
+  const lrb=document.getElementById('listRangeBtn');
+  const ab=document.getElementById('addBtn');
+  const ttl=document.getElementById('todayBtnTimeline');
+  const ttc=document.getElementById('todayBtnCalendar');
+  const ttli=document.getElementById('todayBtnList');
+  const fp=document.getElementById('filterPanel');
+  const yrp=document.getElementById('yearRangePanel');
+  const lrp=document.getElementById('listRangePanel');
 
-  // 모두 초기화
-  [fb,yrb,lrb,ab].forEach(el=>{ if(el) el.style.display='none'; });
-  [fp,yrp,lrp].forEach(el=>{ if(el) el.classList.remove('open'); });
+  [fb,yrb,lrb,ab,ttl,ttc,ttli].forEach(el=>{if(el)el.style.display='none';});
+  [fp,yrp,lrp].forEach(el=>{if(el)el.classList.remove('open');});
 
-  if(idx===3) return; // 설정 탭: 버튼 없음
-
-  // 공통 버튼
-  if(fb) fb.style.display='';
-  if(ab) ab.style.display='';
-
-  if(idx===0){ // 타임라인: 📅 (연도 기간)
-    if(yrb) yrb.style.display='';
-  } else if(idx===2){ // 리스트: 📅 (연월 기간)
-    if(lrb) lrb.style.display='';
-  }
-  // 달력(idx===1): 🔍 + ＋ 만
+  if(idx===3)return;
+  if(fb)fb.style.display='';
+  if(ab)ab.style.display='';
+  if(idx===0){if(yrb)yrb.style.display='';if(ttl)ttl.style.display='';}
+  else if(idx===1){if(ttc)ttc.style.display='';}
+  else if(idx===2){if(lrb)lrb.style.display='';if(ttli)ttli.style.display='';}
 }
 
 // ── 타임라인 기간 검증 공통 ──
@@ -2451,22 +2656,18 @@ function applyTimelineRange(){
 function updateTimelineRange(){ applyTimelineRange(); }
 
 function switchTab(idx,el){
-  // 현재 탭 필터 저장
   saveTabFilter(currentTabIdx);
   currentTabIdx=idx;
-
+  const TAB_ICONS=['📋','📆','📑','⚙️'];
   document.querySelectorAll('.screen').forEach((s,i)=>s.classList.toggle('active',i===idx));
-  document.querySelectorAll('.tab-item').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.tab-item').forEach((t,i)=>{
+    t.classList.remove('active');
+    t.querySelector('.tab-icon').textContent = i===idx ? '🍀' : TAB_ICONS[i];
+  });
   el.classList.add('active');
   updateAppbarForTab(idx);
-
-  if(idx<3){
-    loadTabFilter(idx); // 해당 탭의 독립 필터 복원
-    if(idx===1) renderCalendar();
-    else if(idx===2) renderList();
-  } else {
-    renderUserList();
-  }
+  if(idx<3){loadTabFilter(idx);if(idx===1)renderCalendar();else if(idx===2)renderList();}
+  else{renderUserList();}
 }
 function toggleFilter(){
   document.getElementById('filterPanel').classList.toggle('open');
@@ -2594,5 +2795,52 @@ setTimeout(()=>{
   if(listTarget) listTarget.scrollIntoView({block:'start'});
 }, 200);
 </script>
+
+  <!-- + 버튼 선택 모달 -->
+  <div class="confirm-overlay" id="addChoiceModal">
+    <div class="confirm-box">
+      <div class="confirm-title">무엇을 추가할까요?</div>
+      <div class="confirm-btns">
+        <button class="cbtn primary" onclick="document.getElementById('addChoiceModal').classList.remove('open');openAddModal()">📅 일정 추가</button>
+        <button class="cbtn primary" style="background:#F4A836;" onclick="document.getElementById('addChoiceModal').classList.remove('open');openHolidayModal()">📌 특이사항 추가</button>
+        <button class="cbtn cancel" onclick="document.getElementById('addChoiceModal').classList.remove('open')">취소</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 특이사항 추가/수정 모달 -->
+  <div class="modal-overlay" id="holidayModal">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title" id="holidayModalTitle">📌 특이사항 추가</span>
+        <button class="modal-close" onclick="closeHolidayModal()">✕</button>
+      </div>
+      <div class="form-label">📆 날짜</div>
+      <div class="form-row">
+        <input class="form-input" id="hYear"  type="number" placeholder="연도">
+        <input class="form-input" id="hMonth" type="number" placeholder="월" min="1" max="12">
+        <input class="form-input" id="hDay"   type="number" placeholder="일" min="1" max="31">
+      </div>
+      <div class="form-label">📝 내용</div>
+      <input class="form-input" id="hTitle" placeholder="예: 세혜 생일, 회사 워크샵">
+      <input type="hidden" id="hEditKey">
+      <button class="save-btn" onclick="saveHoliday()">✅ 저장하기</button>
+    </div>
+  </div>
+
+  <!-- 이벤트 뷰 팝업 (읽기 + 편집 모드) -->
+  <div class="event-view-overlay" id="eventViewOverlay" onclick="closeEventView()">
+    <div class="event-view-box" onclick="event.stopPropagation()">
+      <div class="event-view-tag" id="evViewTag"></div>
+      <div class="event-view-title" id="evViewTitle"></div>
+      <div class="event-view-line" id="evViewLine"></div>
+      <input type="hidden" id="evViewEditId">
+      <div style="display:flex;gap:8px;margin-top:12px;">
+        <button class="event-view-close" style="flex:1;background:#6BA840;color:#fff;" onclick="editFromView()">✏️ 편집</button>
+        <button class="event-view-close" style="flex:1;" onclick="closeEventView()">닫기</button>
+      </div>
+    </div>
+  </div>
+
 </body>
 </html>
