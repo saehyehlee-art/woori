@@ -300,6 +300,19 @@ html, body {
 .event-view-readonly { font-size:10px; color:#bbb; margin-bottom:12px; text-align:center; }
 .event-view-close { width:100%; padding:9px; background:#f2f2f2; border:none; border-radius:8px; font-size:13px; cursor:pointer; color:#555; }
 
+/* ── 드래그 이동 ── */
+.event-tag.dragging        { opacity:.4; pointer-events:none; }
+.list-item.dragging        { opacity:.4; pointer-events:none; }
+.table-row.drag-over .td.sched,
+.cal-day.drag-over,
+.list-date-header.drag-over { outline:2px dashed #6BA840 !important; background:rgba(107,168,64,.08) !important; }
+#drag-ghost {
+  position:fixed; pointer-events:none; z-index:9999;
+  background:#6BA840; color:#fff; border-radius:8px; padding:4px 10px;
+  font-size:11px; white-space:nowrap; box-shadow:0 2px 8px rgba(0,0,0,.25);
+  opacity:.9; transform:translate(-50%,-50%); display:none;
+}
+
 /* ── 설정 ── */
 .settings-wrap { padding:14px; overflow-y:auto; flex:1; }
 .setting-card { background:#fff; border-radius:12px; padding:14px; margin-bottom:12px; box-shadow:0 1px 4px rgba(0,0,0,.08); }
@@ -821,7 +834,8 @@ html, body {
       <div class="form-label">👤 참여 유저</div>
       <div class="user-chips-select" id="fUserChips"></div>
       <div class="form-label">📝 내용</div>
-      <input class="form-input" id="fTitle" placeholder="예: 저녁 식사, 스터디">
+      <input class="form-input" id="fTitle" list="titleSuggestions" autocomplete="off" placeholder="예: 저녁 식사, 스터디">
+      <datalist id="titleSuggestions"></datalist>
 
       <div class="form-label">🔁 반복 설정</div>
       <div class="repeat-row">
@@ -873,14 +887,17 @@ html, body {
     </div>
   </div>
 
-  <!-- 이벤트 읽기 전용 뷰 팝업 -->
+  <!-- 이벤트 뷰 팝업 (편집/닫기) -->
   <div class="event-view-overlay" id="eventViewOverlay" onclick="closeEventView()">
     <div class="event-view-box" onclick="event.stopPropagation()">
       <div class="event-view-tag" id="evViewTag"></div>
       <div class="event-view-title" id="evViewTitle"></div>
       <div class="event-view-line" id="evViewLine"></div>
-      <div class="event-view-readonly">🔒 이 일정은 읽기만 가능해요</div>
-      <button class="event-view-close" onclick="closeEventView()">확인</button>
+      <input type="hidden" id="evViewEditId">
+      <div style="display:flex;gap:8px;margin-top:14px;">
+        <button class="event-view-close" style="flex:1;background:#6BA840;color:#fff;border:none;" onclick="editFromView()">✏️ 편집</button>
+        <button class="event-view-close" style="flex:1;" onclick="closeEventView()">닫기</button>
+      </div>
     </div>
   </div>
 
@@ -1199,6 +1216,11 @@ function buildDatalistOptions(){
   const hourRangesHtml = hourRanges.map(t=>`<option value="${t}">`).join('');
   document.getElementById('listTime').innerHTML = hourRangesHtml;
 
+  // 모달 제목 자동완성: 기존 일정 제목 목록
+  const titleSet = [...new Set(events.map(e=>e.title).filter(Boolean))].sort();
+  const titleDl = document.getElementById('titleSuggestions');
+  if(titleDl) titleDl.innerHTML = titleSet.map(t=>`<option value="${t}">`).join('');
+
   // 모달 시간: 직접 입력 방식 (datalist 없음)
   // 특이사항
   const holSet = new Set(Object.values(HOLIDAYS));
@@ -1304,19 +1326,18 @@ function renderTimeline(){
     const tagsHtml = visEvts.map(e=>{
       const pal = getUserPalette(e.userLabel);
       const t = e.time ? `${e.time} ` : '';
-      const canEdit = e.users.includes(currentUser);
-      return `<span class="event-tag" style="background:${pal.bg};border-color:${pal.border};color:${pal.text};${!canEdit?'opacity:.8;cursor:default;':''}"
-        onclick="${canEdit?`openEditModal('${e.id}',event)`:`showEventView('${e.id}',event)`}">
+      return `<span class="event-tag" data-evid="${e.id}" style="background:${pal.bg};border-color:${pal.border};color:${pal.text};"
+        onclick="showEventView('${e.id}',event)">
         <b>${e.userLabel}</b> ${t}${e.title}
       </span>`;
     }).join('');
 
-    html += `<div class="table-row${isMon?' week-start':''}">
-      <div class="td ${cls}">${d.getFullYear()}</div>
-      <div class="td ${cls}">${d.getMonth()+1}</div>
-      <div class="td ${cls}">${d.getDate()}</div>
-      <div class="td ${cls}">${wdKr}</div>
-      <div class="td holiday-txt">${HOLIDAYS[dStr]||''}</div>
+    html += `<div class="table-row${isMon?' week-start':''}" data-date="${dStr}">
+      <div class="td ${cls}" onclick="openAddModalWithDate(${d.getFullYear()},${d.getMonth()+1},${d.getDate()})" style="cursor:pointer;">${d.getFullYear()}</div>
+      <div class="td ${cls}" onclick="openAddModalWithDate(${d.getFullYear()},${d.getMonth()+1},${d.getDate()})" style="cursor:pointer;">${d.getMonth()+1}</div>
+      <div class="td ${cls}" onclick="openAddModalWithDate(${d.getFullYear()},${d.getMonth()+1},${d.getDate()})" style="cursor:pointer;">${d.getDate()}</div>
+      <div class="td ${cls}" onclick="openAddModalWithDate(${d.getFullYear()},${d.getMonth()+1},${d.getDate()})" style="cursor:pointer;">${wdKr}</div>
+      <div class="td holiday-txt">${allH[dStr]||''}</div>
       <div class="td sched">${tagsHtml}</div>
     </div>`;
   }
@@ -1364,16 +1385,16 @@ const allH={...HOLIDAYS,...customHolidays};
     const evtHtml=dayEvts.map(e=>{
       const pal=getUserPalette(e.userLabel);
       const t=e.time?e.time+' ':'';
-      const canEdit=e.users.includes(currentUser);
-      return `<div class="cal-event" style="background:${pal.bg};border-left:2px solid ${pal.border};color:${pal.text};${!canEdit?'opacity:.8;':''}"
-        onclick="${canEdit?`openEditModal('${e.id}',event)`:`showEventView('${e.id}',event)`}"><b>${e.userLabel}</b> ${t}${e.title}</div>`;
+      return `<div class="cal-event" data-evid="${e.id}" style="background:${pal.bg};border-left:2px solid ${pal.border};color:${pal.text};"
+        onclick="showEventView('${e.id}',event)"><b>${e.userLabel}</b> ${t}${e.title}</div>`;
     }).join('');
     const moreHtml = '';
 
     // 공휴일 이름
     const holName = allH[dStr]||'';
 
-    html+=`<div class="cal-day${dStr===todayStr?' today-day':''}${hasEvts?' has-events':''}${isHoliday?' holiday-day':''}">
+    html+=`<div class="cal-day${dStr===todayStr?' today-day':''}${hasEvts?' has-events':''}${isHoliday?' holiday-day':''}"
+      data-date="${dStr}" onclick="openAddModalWithDate(${calYear},${calMonth+1},${day})">
       <div class="cal-day-header">
         <span class="cal-day-num" style="color:${numColor}">${day}</span>
         ${holName?`<span class="cal-holiday-name">${holName}</span>`:''}
@@ -1416,11 +1437,16 @@ function changeMonth(delta){
 // ═══════════════════════════════════════════
 //  모달 - 추가
 // ═══════════════════════════════════════════
-function openAddModal(){
+function openAddModalWithDate(y, m, d){
+  openAddModal(`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
+}
+
+function openAddModal(preDate){
+  const _d = preDate ? new Date(preDate+'T00:00') : new Date();
   document.getElementById('modalTitle').textContent='➕ 일정 추가';
-  document.getElementById('fYear').value=2026;
-  document.getElementById('fMonth').value=1;
-  document.getElementById('fDay').value=1;
+  document.getElementById('fYear').value=_d.getFullYear();
+  document.getElementById('fMonth').value=_d.getMonth()+1;
+  document.getElementById('fDay').value=_d.getDate();
   document.getElementById('fTime').value='';
   document.getElementById('fTitle').value='';
   document.getElementById('fEditId').value='';
@@ -1431,25 +1457,6 @@ function openAddModal(){
 }
 
 let pendingEditId=null, pendingEditAll=false;
-
-function showEventView(id, e){
-  if(e) e.stopPropagation();
-  const evt=events.find(x=>x.id===id);
-  if(!evt) return;
-  const pal=getUserPalette(evt.userLabel);
-  const d=new Date(evt.date+'T00:00');
-  const wd=WD[d.getDay()];
-  const dateStr=`${d.getFullYear()}.${pad(d.getMonth()+1)}.${pad(d.getDate())} (${wd})`;
-  const holiday=HOLIDAYS[evt.date]?` · ${HOLIDAYS[evt.date]}`:'';
-  document.getElementById('evViewTag').textContent=evt.userLabel;
-  document.getElementById('evViewTag').style=`background:${pal.bg};color:${pal.text};border:1px solid ${pal.border};`;
-  document.getElementById('evViewTitle').textContent=evt.title;
-  document.getElementById('evViewLine').textContent=`${dateStr}${holiday}${evt.time?' · '+evt.time:''}`;
-  document.getElementById('eventViewOverlay').classList.add('open');
-}
-function closeEventView(){
-  document.getElementById('eventViewOverlay').classList.remove('open');
-}
 
 function openEditModal(id, e){
   if(e) e.stopPropagation();
@@ -1883,7 +1890,7 @@ function _colRoleOptions(selected){
     {v:'year',    l:'📅 연도'},
     {v:'month',   l:'📅 월'},
     {v:'day',     l:'📅 일'},
-    {v:'special', l:'📌 특이사항 (무시)'},
+    {v:'special', l:'📌 특이사항 (날짜에 표시)'},
     {v:'shared',  l:'👥 공동 일정'},
   ];
   // 현재 등록된 유저들을 옵션에 추가
@@ -2057,11 +2064,17 @@ function confirmExcelImport(){
     const dateStr = `${yr}-${String(mo).padStart(2,'0')}-${String(dy).padStart(2,'0')}`;
 
     roles.forEach((role,ci)=>{
-      if(role==='ignore'||role==='year'||role==='month'||role==='day'||role==='special') return;
+      if(role==='ignore'||role==='year'||role==='month'||role==='day') return;
       const cellVal = String(row[ci]||'').trim();
       if(!cellVal) return;
-      const {time, title} = _extractTime(cellVal);
 
+      // 특이사항 컬럼: customHolidays에 저장
+      if(role==='special'){
+        customHolidays[dateStr] = cellVal;
+        return;
+      }
+
+      const {time, title} = _extractTime(cellVal);
       let userList = [];
       if(role==='shared'){
         const parts = headers[ci].split(/[&＆+]/);
@@ -2126,18 +2139,21 @@ const allH={...HOLIDAYS,...customHolidays};
     const isRed=date.getDay()===0||isHoliday;
     const isBlue=date.getDay()===6&&!isHoliday;
     const dateColor=isRed?'#D32F2F':isBlue?'#1977CC':'#5A9A32';
-    html+=`<div class="list-date-header" style="color:${dateColor}">
+    html+=`<div class="list-date-header" data-date="${dStr}" style="color:${dateColor};cursor:pointer;"
+      onclick="openAddModalWithDate(${date.getFullYear()},${date.getMonth()+1},${date.getDate()})"
+      ondragover="event.preventDefault();this.classList.add('drag-over')"
+      ondragleave="this.classList.remove('drag-over')"
+      ondrop="_onDrop('${dStr}',this,event)">
       ${date.getFullYear()}년 ${date.getMonth()+1}월 ${date.getDate()}일 (${wd})${holStr}${dStr===todayStr?' <span style="color:#F4A836;font-size:12px;">Today★</span>':''}
     </div>`;
     for(const e of evts){
       const pal=getUserPalette(e.userLabel);
-      const canEdit=e.users.includes(currentUser);
       // 클로버 이모지: 파스텔 연두색, 명도를 한 단계 낮춤
       const cloverFilter = 'saturate(0.85) brightness(1.05)';
       const rotAngles=[-18,-12,-8,5,10,15,-5];
       const rotAngle=rotAngles[strHash(e.id)%rotAngles.length];
-      html+=`<div class="list-item" style="${!canEdit?'opacity:.8;':''}"
-        onclick="${canEdit?`openEditModal('${e.id}',event)`:`showEventView('${e.id}',event)`}">
+      html+=`<div class="list-item" data-evid="${e.id}"
+        onclick="showEventView('${e.id}',event)">
         <span class="list-clover" style="transform:rotate(${rotAngle}deg);filter:${cloverFilter};">🍀</span>
         ${e.time?`<span class="list-item-time">${e.time}</span>`:`<span class="list-item-time"></span>`}
         <span class="list-item-user" style="background:${pal.bg};color:${pal.text};border:1px solid ${pal.border};">${e.userLabel}</span>
@@ -2208,10 +2224,25 @@ async function loginWithGoogle(){
 }
 
 function loginSkip(){
-  // 건너뛰기: 이름 선택 화면으로 (방 없음)
+  // 건너뛰기: 저장된 이름/방이 있으면 바로 입장, 없으면 방 선택
   document.getElementById('loginScreen').style.display='none';
-  _pendingRoomCode = null;
-  _showNameScreen(users, false);
+  const savedUser = localStorage.getItem(USER_LS_KEY);
+  const rooms = _getSavedRooms();
+  const lastCode = localStorage.getItem(ROOM_LS_KEY);
+  if(rooms.length > 0 && savedUser){
+    currentUser = savedUser;
+    if(!users.includes(savedUser)) users.push(savedUser);
+    const code = lastCode || rooms[0].code;
+    _setRoom(code);
+    _enterApp();
+  } else if(rooms.length > 0){
+    const code = lastCode || rooms[0].code;
+    _pendingRoomCode = code;
+    _showNameScreen(users, false);
+  } else {
+    _pendingRoomCode = null;
+    _showRoomScreen();
+  }
 }
 
 function skipRoom(){
@@ -2728,6 +2759,172 @@ function toggleFilter(){
 }
 
 // ═══════════════════════════════════════════
+//  드래그 & 드롭 (PC 마우스 + 모바일 꾹 누르기)
+// ═══════════════════════════════════════════
+let _dragEvId = null;     // 드래그 중인 이벤트 ID
+let _dragSrcEl = null;    // 드래그 중인 DOM 요소
+let _touchTimer = null;   // 모바일 꾹 누르기 타이머
+let _isTouchDrag = false; // 현재 터치 드래그 중
+
+const _ghost = () => document.getElementById('drag-ghost');
+
+// ── 드래그 시작 (PC) ──
+function _onDragStart(evId, el, ev){
+  _dragEvId = evId;
+  _dragSrcEl = el;
+  el.classList.add('dragging');
+  ev.dataTransfer.effectAllowed = 'move';
+  ev.dataTransfer.setData('text/plain', evId);
+  const g = _ghost();
+  const evt = events.find(x=>x.id===evId);
+  if(evt){ g.textContent = evt.title; g.style.display='block'; }
+}
+
+function _onDragEnd(el){
+  el.classList.remove('dragging');
+  _dragEvId = null; _dragSrcEl = null;
+  _ghost().style.display = 'none';
+  document.querySelectorAll('.drag-over').forEach(e=>e.classList.remove('drag-over'));
+}
+
+function _onDragOver(dateStr, el, ev){
+  if(!_dragEvId) return;
+  ev.preventDefault(); ev.dataTransfer.dropEffect='move';
+  document.querySelectorAll('.drag-over').forEach(e=>e.classList.remove('drag-over'));
+  el.classList.add('drag-over');
+}
+
+function _onDrop(dateStr, el, ev){
+  ev.preventDefault();
+  if(!_dragEvId) return;
+  _moveEventToDate(_dragEvId, dateStr);
+  el.classList.remove('drag-over');
+}
+
+// ── 이벤트 날짜 변경 공통 ──
+function _moveEventToDate(evId, newDate){
+  const evt = events.find(x=>x.id===evId);
+  if(!evt || evt.date===newDate) return;
+  evt.date = newDate;
+  renderTimeline(); renderCalendar(); renderList();
+  setTimeout(_bindDragEvents, 50);
+  pushToFirebase();
+}
+
+// ── 터치 드래그 (모바일 꾹 누르기) ──
+function _onTouchStart(evId, el, ev){
+  _touchTimer = setTimeout(()=>{
+    _isTouchDrag = true;
+    _dragEvId = evId;
+    _dragSrcEl = el;
+    el.classList.add('dragging');
+    const evt = events.find(x=>x.id===evId);
+    const g = _ghost();
+    if(evt){ g.textContent = evt.title; }
+    g.style.display = 'block';
+    // 진동 피드백 (지원 시)
+    if(navigator.vibrate) navigator.vibrate(40);
+  }, 500);
+}
+
+function _onTouchMove(ev){
+  if(!_isTouchDrag) return;
+  ev.preventDefault();
+  const t = ev.touches[0];
+  const g = _ghost();
+  g.style.left = t.clientX+'px';
+  g.style.top  = t.clientY+'px';
+
+  // 현재 터치 위치 아래 요소 찾기
+  g.style.display='none';
+  const el = document.elementFromPoint(t.clientX, t.clientY);
+  g.style.display='block';
+
+  document.querySelectorAll('.drag-over').forEach(e=>e.classList.remove('drag-over'));
+  if(!el) return;
+  const row = el.closest('.table-row[data-date]');
+  const calDay = el.closest('.cal-day[data-date]');
+  const listHdr = el.closest('.list-date-header[data-date]');
+  const target = row||calDay||listHdr;
+  if(target) target.classList.add('drag-over');
+}
+
+function _onTouchEnd(ev){
+  clearTimeout(_touchTimer);
+  if(!_isTouchDrag){ _isTouchDrag=false; return; }
+  _isTouchDrag = false;
+
+  const g = _ghost(); g.style.display='none';
+  const t = ev.changedTouches[0];
+
+  g.style.display='none';
+  const el = document.elementFromPoint(t.clientX, t.clientY);
+
+  document.querySelectorAll('.drag-over').forEach(e=>e.classList.remove('drag-over'));
+  if(el && _dragEvId){
+    const row = el.closest('.table-row[data-date]');
+    const calDay = el.closest('.cal-day[data-date]');
+    const listHdr = el.closest('.list-date-header[data-date]');
+    const target = row||calDay||listHdr;
+    if(target){ _moveEventToDate(_dragEvId, target.dataset.date); }
+  }
+
+  if(_dragSrcEl) _dragSrcEl.classList.remove('dragging');
+  _dragEvId = null; _dragSrcEl = null;
+}
+
+// ── 렌더링 후 드래그 이벤트 연결 ──
+function _bindDragEvents(){
+  // PC drag — timeline event-tags
+  document.querySelectorAll('#timeline-body .event-tag[data-evid]').forEach(el=>{
+    const id = el.dataset.evid;
+    el.draggable = true;
+    el.addEventListener('dragstart', ev=>_onDragStart(id,el,ev));
+    el.addEventListener('dragend',   ()=>_onDragEnd(el));
+  });
+  // PC drag — cal-events
+  document.querySelectorAll('#cal-body .cal-event[data-evid]').forEach(el=>{
+    const id = el.dataset.evid;
+    el.draggable = true;
+    el.addEventListener('dragstart', ev=>_onDragStart(id,el,ev));
+    el.addEventListener('dragend',   ()=>_onDragEnd(el));
+  });
+  // PC drag — list-items
+  document.querySelectorAll('#list-body .list-item[data-evid]').forEach(el=>{
+    const id = el.dataset.evid;
+    el.draggable = true;
+    el.addEventListener('dragstart', ev=>_onDragStart(id,el,ev));
+    el.addEventListener('dragend',   ()=>_onDragEnd(el));
+  });
+
+  // PC drop targets — timeline rows
+  document.querySelectorAll('#timeline-body .table-row[data-date]').forEach(el=>{
+    const date = el.dataset.date;
+    el.addEventListener('dragover', ev=>_onDragOver(date,el,ev));
+    el.addEventListener('drop',     ev=>_onDrop(date,el,ev));
+    el.addEventListener('dragleave',()=>el.classList.remove('drag-over'));
+  });
+  // PC drop targets — cal-days
+  document.querySelectorAll('#cal-body .cal-day[data-date]').forEach(el=>{
+    const date = el.dataset.date;
+    el.addEventListener('dragover', ev=>_onDragOver(date,el,ev));
+    el.addEventListener('drop',     ev=>_onDrop(date,el,ev));
+    el.addEventListener('dragleave',()=>el.classList.remove('drag-over'));
+  });
+
+  // Mobile touch drag — all event elements
+  document.querySelectorAll('.event-tag[data-evid], .cal-event[data-evid], .list-item[data-evid]').forEach(el=>{
+    const id = el.dataset.evid;
+    el.addEventListener('touchstart', ev=>_onTouchStart(id,el,ev), {passive:true});
+    el.addEventListener('touchcancel',()=>{ clearTimeout(_touchTimer); _isTouchDrag=false; if(_dragSrcEl)_dragSrcEl.classList.remove('dragging'); });
+  });
+}
+
+// touchmove/touchend 전역 리스너 (한 번만 등록)
+document.addEventListener('touchmove', _onTouchMove, {passive:false});
+document.addEventListener('touchend',  _onTouchEnd);
+
+// ═══════════════════════════════════════════
 //  초기화
 // ═══════════════════════════════════════════
 function renderAll(){
@@ -2737,6 +2934,8 @@ function renderAll(){
   renderCalendar();
   renderList();
   renderUserList();
+  // 렌더링 완료 후 드래그 이벤트 연결 (setTimeout으로 DOM 업데이트 보장)
+  setTimeout(_bindDragEvents, 50);
 }
 // ── 기간 설정 커스텀 드롭다운 ──
 let _rdBlurTimer = null;
@@ -2882,19 +3081,9 @@ setTimeout(()=>{
     </div>
   </div>
 
-  <!-- 이벤트 뷰 팝업 (읽기 + 편집 모드) -->
-  <div class="event-view-overlay" id="eventViewOverlay" onclick="closeEventView()">
-    <div class="event-view-box" onclick="event.stopPropagation()">
-      <div class="event-view-tag" id="evViewTag"></div>
-      <div class="event-view-title" id="evViewTitle"></div>
-      <div class="event-view-line" id="evViewLine"></div>
-      <input type="hidden" id="evViewEditId">
-      <div style="display:flex;gap:8px;margin-top:12px;">
-        <button class="event-view-close" style="flex:1;background:#6BA840;color:#fff;" onclick="editFromView()">✏️ 편집</button>
-        <button class="event-view-close" style="flex:1;" onclick="closeEventView()">닫기</button>
-      </div>
-    </div>
-  </div>
+
+<!-- 드래그 이동 고스트 요소 -->
+<div id="drag-ghost"></div>
 
 </body>
 </html>
