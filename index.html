@@ -14,8 +14,29 @@
 <script>
 if('serviceWorker' in navigator){
   window.addEventListener('load', ()=>{
-    navigator.serviceWorker.register('sw.js').then(r=>console.log('SW registered')).catch(e=>console.log('SW error',e));
+    navigator.serviceWorker.register('sw.js').then(reg=>{
+      console.log('SW registered');
+      // 새 버전 감지 → 업데이트 배너 표시
+      reg.addEventListener('updatefound', ()=>{
+        const nw = reg.installing;
+        nw.addEventListener('statechange', ()=>{
+          if(nw.state==='installed' && navigator.serviceWorker.controller){
+            _showUpdateBanner();
+          }
+        });
+      });
+    }).catch(e=>console.log('SW error',e));
+    // 새 SW가 제어권 가져가면 자동 새로고침
+    navigator.serviceWorker.addEventListener('controllerchange', ()=>{ window.location.reload(); });
   });
+}
+function _showUpdateBanner(){
+  if(document.getElementById('updateBanner')) return;
+  const b = document.createElement('div');
+  b.id='updateBanner';
+  b.style.cssText='position:fixed;bottom:62px;left:0;right:0;background:#1E6614;color:#fff;padding:10px 16px;text-align:center;z-index:9999;font-size:13px;';
+  b.innerHTML='🆕 새 버전이 있어요! <button onclick="window.location.reload()" style="margin-left:10px;background:#fff;color:#1E6614;border:none;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:13px;">지금 업데이트</button>';
+  document.body.appendChild(b);
 }
 </script>
 <title>우리일정</title>
@@ -72,6 +93,23 @@ window._fbGetRoomData = async (code) => {
 // 실시간 리스닝 (구독 해제 함수 반환)
 window._fbListenRoom = (code, cb) =>
   onValue(ref(db, `rooms/${code}/data`), snap => cb(snap.val()));
+
+// 알림 Push (알림 하나 저장)
+window._fbPushNotif = (code, notif) =>
+  set(ref(db, `rooms/${code}/notifications/${notif.id}`), notif);
+// 알림 승인 (특정 유저가 deleteApproval 승인)
+window._fbApproveNotif = (code, notifId, userName) =>
+  set(ref(db, `rooms/${code}/notifications/${notifId}/approvals/${userName.replace(/[.#$\/\[\]]/g,'_')}`), true);
+// 알림 실시간 리스닝
+window._fbListenNotifs = (code, cb) =>
+  onValue(ref(db, `rooms/${code}/notifications`), snap => cb(snap.val()));
+// 알림 노드 업데이트 (예: executed 플래그)
+window._fbUpdateNotif = (code, notifId, updates) => {
+  const base = ref(db, `rooms/${code}/notifications/${notifId}`);
+  return get(base).then(snap => {
+    if(snap.exists()) set(base, {...snap.val(), ...updates});
+  });
+};
 </script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -313,6 +351,34 @@ html, body {
   font-size:11px; white-space:nowrap; box-shadow:0 2px 8px rgba(0,0,0,.25);
   opacity:.9; transform:translate(-50%,-50%); display:none;
 }
+
+/* ── 알림 탭 ── */
+.notif-wrap { padding:12px; overflow-y:auto; flex:1; }
+.notif-item {
+  background:#fff; border-radius:12px; padding:12px 14px;
+  margin-bottom:10px; box-shadow:0 1px 4px rgba(0,0,0,.08);
+  cursor:default;
+}
+.notif-item.unread { border-left:3px solid #6BA840; }
+.notif-item.approval { border-left:3px solid #D32F2F; background:#fff8f8; }
+.notif-item-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
+.notif-item-title { font-size:13px; font-weight:bold; color:#222; }
+.notif-item-title.approval-title { color:#D32F2F; }
+.notif-item-time { font-size:10px; color:#aaa; }
+.notif-item-body { font-size:12px; color:#555; line-height:1.5; }
+.notif-approve-btn {
+  margin-top:10px; width:100%; padding:9px;
+  background:#D32F2F; color:#fff; border:none;
+  border-radius:8px; font-size:13px; cursor:pointer;
+}
+.notif-approve-btn:disabled { background:#ccc; cursor:default; }
+.notif-badge {
+  display:inline-block; background:#D32F2F; color:#fff;
+  border-radius:50%; width:16px; height:16px;
+  font-size:9px; line-height:16px; text-align:center;
+  position:absolute; top:-2px; right:-4px; font-weight:bold;
+}
+.tab-icon-wrap { position:relative; display:inline-block; }
 
 /* ── 설정 ── */
 .settings-wrap { padding:14px; overflow-y:auto; flex:1; }
@@ -721,8 +787,15 @@ html, body {
       <div class="list-wrap" id="list-body"></div>
     </div>
 
-    <!-- 화면4: 설정 -->
+    <!-- 화면4: 알림 -->
     <div class="screen" id="screen-3">
+      <div class="notif-wrap" id="notif-list">
+        <p style="text-align:center;color:#aaa;font-size:13px;margin-top:30px;">알림이 없어요</p>
+      </div>
+    </div>
+
+    <!-- 화면5: 설정 -->
+    <div class="screen" id="screen-4">
       <div class="settings-wrap">
         <div class="setting-card">
           <div class="setting-title">👥 유저 관리</div>
@@ -790,7 +863,8 @@ html, body {
     <button class="tab-item active" onclick="switchTab(0,this)"><span class="tab-icon">📋</span>타임라인</button>
     <button class="tab-item"        onclick="switchTab(1,this)"><span class="tab-icon">🗓️</span>달력</button>
     <button class="tab-item"        onclick="switchTab(2,this)"><span class="tab-icon">📑</span>리스트</button>
-    <button class="tab-item"        onclick="switchTab(3,this)"><span class="tab-icon">⚙️</span>설정</button>
+    <button class="tab-item"        onclick="switchTab(3,this)"><span class="tab-icon-wrap"><span class="tab-icon">🔔</span><span class="notif-badge" id="notifBadge" style="display:none;"></span></span>알림</button>
+    <button class="tab-item"        onclick="switchTab(4,this)"><span class="tab-icon">⚙️</span>설정</button>
   </div>
 
   <!-- 기간 설정 커스텀 드롭다운 -->
@@ -1550,6 +1624,7 @@ function saveEvent(){
       events=events.map(e=>e.id===editId?{...e,date:dateStr,userLabel,users:sortedUsers,time,title}:e);
     }
     closeModal(); buildDatalistOptions(); renderTimeline(); renderCalendar(); renderList();
+    _pushNotif('edit', `📝 일정 수정: ${title}`, {date:dateStr, user:userLabel});
     pushToFirebase(); return;
   }
 
@@ -1557,6 +1632,7 @@ function saveEvent(){
   if(repeatType==='none'){
     events.push({id:uuid(),date:dateStr,userLabel,users:sortedUsers,time,title});
     closeModal(); buildDatalistOptions(); renderTimeline(); renderCalendar(); renderList();
+    _pushNotif('add', `📅 일정 추가: ${title}`, {date:dateStr, user:userLabel});
     pushToFirebase(); return;
   }
 
@@ -1597,6 +1673,7 @@ function saveEvent(){
   }
   events.push(...generated);
   closeModal(); buildDatalistOptions(); renderTimeline(); renderCalendar(); renderList();
+  _pushNotif('add', `📅 반복 일정 추가: ${title} (${generated.length}개)`);
   pushToFirebase();
   alert(`✅ 반복 일정 ${generated.length}개 추가됐어요!`);
 }
@@ -1626,11 +1703,21 @@ function deduplicateEvents(){
 
 function deleteAllEvents(){
   if(events.length === 0){ alert('삭제할 일정이 없어요'); return; }
-  if(!confirm(`⚠️ 모든 일정 ${events.length}개를 삭제할까요?\n이 작업은 되돌릴 수 없어요.`)) return;
-  events = [];
-  renderTimeline(); renderCalendar(); renderList();
-  pushToFirebase();
-  alert('✅ 모든 일정이 삭제되었어요.');
+  if(!currentRoomCode){
+    // 방에 연결되지 않은 경우 바로 삭제
+    if(!confirm(`⚠️ 모든 일정 ${events.length}개를 삭제할까요?\n이 작업은 되돌릴 수 없어요.`)) return;
+    events = [];
+    renderTimeline(); renderCalendar(); renderList();
+    return;
+  }
+  if(!confirm(`⚠️ 모든 일정 ${events.length}개를 삭제할까요?\n다른 사용자의 승인이 필요해요.`)) return;
+  // 다른 사용자에게 승인 알림 전송
+  _pushNotif('deleteApproval', '일정 전체 삭제하기에 승인하십니까?', {
+    approvals: {[currentUser.replace(/[.#$\/\[\]]/g,'_')]: true},
+    executed: false,
+    eventCount: events.length
+  });
+  alert(`📢 다른 사용자에게 승인 요청을 보냈어요.\n알림탭에서 확인하세요.`);
 }
 
 // ═══════════════════════════════════════════
@@ -1833,29 +1920,25 @@ function _extractTime(text){
   return {time:'', title: s};
 }
 
-// 한 셀에 "17:00유상호 18:20 작가모임" 처럼 여러 이벤트가 있을 때 분리
+// 한 셀에 여러 이벤트가 있을 때 분리
+// 형식: "00:00 이벤트명" (줄바꿈으로 여러 개)
 // 반환: [{time, title}, ...] (항상 1개 이상)
 function _splitMultiTimeEntries(text){
   if(!text) return [];
   const s = String(text).trim();
-  // 시간 패턴(\d{1,2}:\d{2})으로 분할 시도
-  // 예: "17:00유상호 18:20 작가모임" → ['17:00유상호 ', '18:20 작가모임']
-  const parts = s.split(/(?=\d{1,2}:\d{2})/);
-  if(parts.length <= 1) {
-    // 시간이 하나도 없거나 1개인 경우 그냥 반환
-    const single = _extractTime(s);
-    return single.title ? [single] : [];
-  }
+  if(!s) return [];
+
+  // 줄바꿈으로 먼저 분리
+  const lines = s.split(/[\n\r]+/).map(l=>l.trim()).filter(Boolean);
   const result = [];
-  for(const part of parts){
-    const p = part.trim();
-    if(!p) continue;
-    const m = p.match(/^(\d{1,2}:\d{2})\s*(.*)$/);
+  for(const line of lines){
+    // "00:00 이벤트명" 형식 파싱
+    const m = line.match(/^(\d{1,2}:\d{2})\s+(.+)$/);
     if(m){
-      const title = m[2].trim();
-      if(title) result.push({time: m[1], title});
-    } else if(p){
-      result.push({time:'', title: p});
+      result.push({time: m[1], title: m[2].trim()});
+    } else {
+      // 시간 없는 단순 텍스트
+      result.push({time:'', title: line});
     }
   }
   return result.length ? result : [{time:'', title: s}];
@@ -2232,7 +2315,10 @@ function _onLoginSuccess(){
 
 // 자동 로그인 콜백 (Firebase onAuthStateChanged 에서 호출)
 window._fbAutoLogin = function(user){
-  // Google 표시 이름은 참고용으로만 (실제 앱 내 이름은 별도 선택)
+  // 이미 앱 화면이 열려 있으면 무시 (세션 중 재발동 방지)
+  const loginEl = document.getElementById('loginScreen');
+  if(!loginEl || loginEl.style.display === 'none') return;
+  // 로그인 화면이 실제로 보일 때만 처리
   _onLoginSuccess();
 };
 
@@ -2288,7 +2374,10 @@ function skipRoom(){
 // ═══════════════════════════════════════════
 let currentRoomCode  = null;  // 현재 참여 중인 방 코드
 let _pendingRoomCode = null;  // 이름 선택 전 임시 저장 방 코드
-let _roomUnsubscribe = null;  // Firebase onValue 구독 해제 함수
+let _roomUnsubscribe  = null;  // Firebase onValue 구독 해제 함수
+let _notifUnsubscribe = null;  // Firebase 알림 구독 해제 함수
+let _localNotifs      = [];    // 로컬 알림 캐시 (시간 역순 정렬)
+let _notifReadSet     = new Set(); // 읽은 알림 ID
 // ROOM_LS_KEY, USER_LS_KEY는 위에서 이미 선언됨
 
 // ── 랜덤 6자리 방 코드 생성 (헷갈리는 문자 제외) ──
@@ -2308,6 +2397,111 @@ function pushToFirebase(){
     users: users,
     customHolidays: customHolidays
   }).catch(e=>console.warn('Firebase 동기화 오류:', e));
+}
+
+// ═══════════════════════════════════════════
+//  알림(Notification) 시스템
+// ═══════════════════════════════════════════
+
+// 알림 Push 헬퍼
+function _pushNotif(type, message, extraData){
+  if(!currentRoomCode || typeof window._fbPushNotif !== 'function') return;
+  const id = 'notif_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
+  const notif = {id, type, message, author: currentUser, time: Date.now(), ...extraData};
+  window._fbPushNotif(currentRoomCode, notif).catch(e=>console.warn('알림 Push 오류:',e));
+}
+
+// 알림 배지 업데이트
+function _updateNotifBadge(){
+  const badge = document.getElementById('notifBadge');
+  if(!badge) return;
+  const unread = _localNotifs.filter(n => !_notifReadSet.has(n.id)).length;
+  if(unread > 0){
+    badge.textContent = unread > 9 ? '9+' : String(unread);
+    badge.style.display = 'inline-block';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+// 알림 탭 열 때 읽음 표시
+function _markNotifsRead(){
+  _localNotifs.forEach(n => _notifReadSet.add(n.id));
+  _updateNotifBadge();
+}
+
+// 알림 렌더링
+function renderNotifications(){
+  const wrap = document.getElementById('notif-list');
+  if(!wrap) return;
+  if(!_localNotifs.length){
+    wrap.innerHTML = '<p style="text-align:center;color:#aaa;font-size:13px;margin-top:30px;">알림이 없어요</p>';
+    return;
+  }
+  const fmt = t => {
+    const d = new Date(t);
+    return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  };
+  wrap.innerHTML = _localNotifs.map(n => {
+    const isRead   = _notifReadSet.has(n.id);
+    const isApproval = n.type === 'deleteApproval' && !n.executed;
+    const myApproval = n.approvals && n.approvals[currentUser.replace(/[.#$\/\[\]]/g,'_')];
+    const approvalDone = n.executed;
+
+    let approvalHtml = '';
+    if(isApproval){
+      if(n.author === currentUser){
+        approvalHtml = `<div style="margin-top:8px;font-size:11px;color:#D32F2F;">⏳ 다른 사용자의 승인을 기다리는 중...</div>`;
+      } else if(myApproval){
+        approvalHtml = `<div style="margin-top:8px;font-size:11px;color:#888;">✅ 승인 완료</div>`;
+      } else {
+        approvalHtml = `<button class="notif-approve-btn" onclick="approveDeleteAll('${n.id}')">✅ 승인합니다</button>`;
+      }
+    }
+    if(approvalDone){
+      approvalHtml = `<div style="margin-top:8px;font-size:11px;color:#888;">🗑️ 삭제가 실행되었어요</div>`;
+    }
+
+    return `<div class="notif-item${isApproval&&!approvalDone?' approval':''}${!isRead?' unread':''}">
+      <div class="notif-item-header">
+        <span class="notif-item-title${isApproval&&!approvalDone?' approval-title':''}">${n.message}</span>
+        <span class="notif-item-time">${fmt(n.time)}</span>
+      </div>
+      <div class="notif-item-body">${n.author} · ${n.type==='add'?'일정 추가':n.type==='edit'?'일정 수정':n.type==='delete'?'일정 삭제':n.type==='deleteApproval'?'전체 삭제 요청':''}</div>
+      ${approvalHtml}
+    </div>`;
+  }).join('');
+}
+
+// 삭제 승인 처리
+function approveDeleteAll(notifId){
+  if(!currentRoomCode || typeof window._fbApproveNotif !== 'function') return;
+  window._fbApproveNotif(currentRoomCode, notifId, currentUser.replace(/[.#$\/\[\]]/g,'_'))
+    .catch(e=>console.warn('승인 오류:',e));
+}
+
+// 삭제 승인 확인 (리스너에서 호출)
+function _checkDeleteApprovals(){
+  _localNotifs.forEach(n => {
+    if(n.type !== 'deleteApproval' || n.executed) return;
+    const approvals = n.approvals || {};
+    // 요청자의 Firebase key (특수문자 → _)
+    const authorKey = n.author.replace(/[.#$\/\[\]]/g,'_');
+    // 요청자 외 다른 누군가가 승인했는지 확인
+    const approvedByOther = Object.keys(approvals).some(k => k !== authorKey);
+    if(!approvedByOther) return;
+    if(typeof window._fbUpdateNotif !== 'function') return;
+
+    // 중복 실행 방지: executed 플래그를 먼저 설정 후 삭제 실행
+    window._fbUpdateNotif(currentRoomCode, n.id, {executed: true})
+      .then(()=>{
+        events = [];
+        customHolidays = {};
+        renderAll();
+        pushToFirebase();
+        _showSyncBadge('🗑️ 일정이 전체 삭제됐어요');
+      }).catch(e=>console.warn('삭제 실행 오류:',e));
+  });
 }
 
 // ── 방 화면 표시 ──
@@ -2428,8 +2622,11 @@ function goBackToRoomScreen(){
 function _setRoom(code){
   currentRoomCode = code;
   localStorage.setItem(ROOM_LS_KEY, code);
+  // 방 전환 시 기존 데이터 클리어 (Firebase에서 새로 불러올 때까지 빈 상태)
+  events = []; customHolidays = {};
 
   if(_roomUnsubscribe){ _roomUnsubscribe(); _roomUnsubscribe=null; }
+  if(_notifUnsubscribe){ _notifUnsubscribe(); _notifUnsubscribe=null; }
   if(typeof window._fbListenRoom !== 'function') return;
 
   _roomUnsubscribe = window._fbListenRoom(code, (data)=>{
@@ -2438,7 +2635,8 @@ function _setRoom(code){
     const incoming = Object.values(data.events || {});
     events = incoming;
     if(Array.isArray(data.users) && data.users.length) users = data.users;
-    if(data.customHolidays && typeof data.customHolidays==='object') customHolidays=data.customHolidays;
+    // customHolidays: Firebase에 없으면 빈 객체로 초기화 (이전 데이터 잔존 방지)
+    customHolidays = (data.customHolidays && typeof data.customHolidays==='object') ? data.customHolidays : {};
 
     // 앱 화면이 열려있을 때만 리렌더 + 배지 표시
     const roomHidden  = document.getElementById('roomScreen').style.display  === 'none';
@@ -2448,6 +2646,20 @@ function _setRoom(code){
       _showSyncBadge('🔄 동기화 완료');
     }
   });
+
+  // 알림 실시간 리스닝
+  if(typeof window._fbListenNotifs === 'function'){
+    _notifUnsubscribe = window._fbListenNotifs(code, (data)=>{
+      _localNotifs = data ? Object.values(data) : [];
+      _localNotifs.sort((a,b)=>b.time-a.time);
+      // 읽지 않은 알림 배지 업데이트
+      _updateNotifBadge();
+      // 알림 탭이 열려있으면 바로 렌더
+      if(currentTabIdx===3) renderNotifications();
+      // 삭제 승인 완료 처리
+      _checkDeleteApprovals();
+    });
+  }
 }
 
 // ── 새 방 만들기 ──
@@ -2510,10 +2722,16 @@ async function joinRoom(){
 function leaveRoom(){
   if(!confirm('이 방을 목록에서 삭제할까요?')) return;
   if(_roomUnsubscribe){_roomUnsubscribe();_roomUnsubscribe=null;}
+  if(_notifUnsubscribe){_notifUnsubscribe();_notifUnsubscribe=null;}
   _saveRooms(_getSavedRooms().filter(r=>r.code!==currentRoomCode));
   currentRoomCode=null;
   localStorage.removeItem(ROOM_LS_KEY);
-  updateRoomInfoInSettings();
+  // 방 데이터 초기화
+  events=[]; customHolidays={}; _localNotifs=[]; _notifReadSet=new Set();
+  renderAll();
+  // 앱 화면 숨기고 방 선택 화면으로
+  ['appbar','content','tabbar'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});
+  _showRoomScreen();
 }
 
 // ── 동기화 알림 배지 ──
@@ -2756,7 +2974,7 @@ function updateAppbarForTab(idx){
   [fb,yrb,lrb,ab,ttl,ttc,ttli].forEach(el=>{if(el)el.style.display='none';});
   [fp,yrp,lrp].forEach(el=>{if(el)el.classList.remove('open');});
 
-  if(idx===3)return;
+  if(idx===3||idx===4)return;  // 알림·설정 탭: 앱바 버튼 숨김
   if(fb)fb.style.display='';
   if(ab)ab.style.display='';
   if(idx===0){if(yrb)yrb.style.display='';if(ttl)ttl.style.display='';}
@@ -2810,16 +3028,18 @@ function updateTimelineRange(){ applyTimelineRange(); }
 function switchTab(idx,el){
   saveTabFilter(currentTabIdx);
   currentTabIdx=idx;
-  const TAB_ICONS=['📋','🗓️','📑','⚙️'];
+  const TAB_ICONS=['📋','🗓️','📑','🔔','⚙️'];
   document.querySelectorAll('.screen').forEach((s,i)=>s.classList.toggle('active',i===idx));
   document.querySelectorAll('.tab-item').forEach((t,i)=>{
     t.classList.remove('active');
-    t.querySelector('.tab-icon').textContent = i===idx ? '🍀' : TAB_ICONS[i];
+    const iconEl = t.querySelector('.tab-icon');
+    if(iconEl) iconEl.textContent = i===idx ? '🍀' : TAB_ICONS[i];
   });
   el.classList.add('active');
   updateAppbarForTab(idx);
   if(idx<3){loadTabFilter(idx);if(idx===1)renderCalendar();else if(idx===2)renderList();}
-  else{renderUserList();}
+  else if(idx===3){ renderNotifications(); _markNotifsRead(); }
+  else{ renderUserList(); }
   if(idx<3) setTimeout(_bindDragEvents, 60);
 }
 function toggleFilter(){
@@ -2882,7 +3102,9 @@ function _moveEventToDate(evId, newDate){
 }
 
 // ── 터치 드래그 (모바일 꾹 누르기) ──
+// 타임라인 탭은 3초, 나머지는 0.5초 (타임라인 스크롤과 구분)
 function _onTouchStart(evId, el, ev){
+  const delay = currentTabIdx === 0 ? 3000 : 500;
   _touchTimer = setTimeout(()=>{
     _isTouchDrag = true;
     _dragEvId = evId;
@@ -2894,7 +3116,7 @@ function _onTouchStart(evId, el, ev){
     g.style.display = 'block';
     // 진동 피드백 (지원 시)
     if(navigator.vibrate) navigator.vibrate(40);
-  }, 500);
+  }, delay);
 }
 
 function _onTouchMove(ev){
