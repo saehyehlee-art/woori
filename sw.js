@@ -1,5 +1,5 @@
 // 우리일정 Service Worker v1.3
-const CACHE_NAME = 'urischedule-v3';
+const CACHE_NAME = 'urischedule-v4';
 const ASSETS = [
   './',
   './index.html',

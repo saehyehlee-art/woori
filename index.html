@@ -9,7 +9,8 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="우리일정">
 <link rel="manifest" href="manifest.json">
-<link rel="apple-touch-icon" href="icon-512.svg">
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+<link rel="apple-touch-icon" sizes="512x512" href="icon-512.png">
 <script>
 if('serviceWorker' in navigator){
   window.addEventListener('load', ()=>{
@@ -1304,6 +1305,7 @@ function rowPassesFilter(date, dStr, visEvts){
 // ═══════════════════════════════════════════
 function renderTimeline(){
   const body = document.getElementById('timeline-body');
+  const allH = {...HOLIDAYS, ...customHolidays};   // ← 반드시 함수 안에서 정의
   const start=new Date(timelineStartYear, timelineStartMonth-1, 1);
   const end  =new Date(timelineEndYear,   timelineEndMonth-1,   new Date(timelineEndYear, timelineEndMonth, 0).getDate());
   let html='', count=0;
@@ -1316,7 +1318,7 @@ function renderTimeline(){
 
     const wd   = d.getDay(); // 0=일
     const wdKr = WD[wd];
-    const isHoliday = !!HOLIDAYS[dStr];
+    const isHoliday = !!allH[dStr];
     const isRed  = wd===0 || isHoliday;
     const isBlue = wd===6 && !isHoliday;
     const cls    = isRed?'red':isBlue?'blue':'';
@@ -1831,6 +1833,34 @@ function _extractTime(text){
   return {time:'', title: s};
 }
 
+// 한 셀에 "17:00유상호 18:20 작가모임" 처럼 여러 이벤트가 있을 때 분리
+// 반환: [{time, title}, ...] (항상 1개 이상)
+function _splitMultiTimeEntries(text){
+  if(!text) return [];
+  const s = String(text).trim();
+  // 시간 패턴(\d{1,2}:\d{2})으로 분할 시도
+  // 예: "17:00유상호 18:20 작가모임" → ['17:00유상호 ', '18:20 작가모임']
+  const parts = s.split(/(?=\d{1,2}:\d{2})/);
+  if(parts.length <= 1) {
+    // 시간이 하나도 없거나 1개인 경우 그냥 반환
+    const single = _extractTime(s);
+    return single.title ? [single] : [];
+  }
+  const result = [];
+  for(const part of parts){
+    const p = part.trim();
+    if(!p) continue;
+    const m = p.match(/^(\d{1,2}:\d{2})\s*(.*)$/);
+    if(m){
+      const title = m[2].trim();
+      if(title) result.push({time: m[1], title});
+    } else if(p){
+      result.push({time:'', title: p});
+    }
+  }
+  return result.length ? result : [{time:'', title: s}];
+}
+
 function _parseAndOpenXlModal(base64str){
   try{
     // ✅ base64 방식 — Android content:// URI / iOS KakaoTalk 모두 호환
@@ -2074,7 +2104,6 @@ function confirmExcelImport(){
         return;
       }
 
-      const {time, title} = _extractTime(cellVal);
       let userList = [];
       if(role==='shared'){
         const parts = headers[ci].split(/[&＆+]/);
@@ -2085,12 +2114,15 @@ function confirmExcelImport(){
       } else if(role==='newuser'){
         userList = [newUserMap[ci]||headers[ci]];
       }
+      const userLabel = userList.length===1 ? userList[0] : userList.join('&');
 
-      const userLabel = userList.length===1 ? userList[0]
-        : userList.join('&');
-      const newId = 'xl_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
-      events.push({id:newId, date:dateStr, userLabel, users:userList, time, title});
-      addedCount++;
+      // 한 셀에 여러 시간대 이벤트가 있을 수 있으므로 분리
+      const entries = _splitMultiTimeEntries(cellVal);
+      for(const entry of entries){
+        const newId = 'xl_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
+        events.push({id:newId, date:dateStr, userLabel, users:userList, time:entry.time, title:entry.title});
+        addedCount++;
+      }
     });
   }
 
@@ -2134,8 +2166,8 @@ const allH={...HOLIDAYS,...customHolidays};
   for(const dStr of keys){
     const {date,evts}=groups[dStr];
     const wd=WD[date.getDay()];
-    const isHoliday=!!HOLIDAYS[dStr];
-    const holStr=isHoliday?` · ${HOLIDAYS[dStr]}`:'';
+    const isHoliday=!!allH[dStr];
+    const holStr=isHoliday?` · ${allH[dStr]}`:'';
     const isRed=date.getDay()===0||isHoliday;
     const isBlue=date.getDay()===6&&!isHoliday;
     const dateColor=isRed?'#D32F2F':isBlue?'#1977CC':'#5A9A32';
@@ -2596,19 +2628,56 @@ function confirmChangeName(){
 function updateRoomInfoInSettings(){
   const el = document.getElementById('currentRoomInfo');
   if(!el) return;
+  const rooms = _getSavedRooms();
   if(currentRoomCode){
+    const curRoom = rooms.find(r=>r.code===currentRoomCode);
+    const curName = curRoom ? curRoom.name : currentRoomCode;
+    // 저장된 방 목록 HTML
+    const roomListHtml = rooms.length > 0
+      ? `<div style="margin-bottom:10px;">
+          <div style="font-size:10px;color:#888;margin-bottom:6px;">저장된 방 목록</div>
+          ${rooms.map(r=>`
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px;">
+              <button onclick="switchToRoom('${r.code}')"
+                style="flex:1;text-align:left;padding:7px 10px;border:${r.code===currentRoomCode?'2px solid #5A9A32':'1px solid #ddd'};border-radius:8px;background:${r.code===currentRoomCode?'#F2F8EC':'#fff'};cursor:pointer;">
+                <div style="font-size:12px;font-weight:bold;color:#1E6614;">${r.name}</div>
+                <div style="font-size:9px;color:#aaa;font-family:monospace;">${r.code}</div>
+              </button>
+              <button onclick="renameRoomInSettings('${r.code}')" style="padding:5px 7px;border:1px solid #ddd;border-radius:6px;background:#fff;font-size:11px;cursor:pointer;" title="이름 변경">✏️</button>
+              <button onclick="deleteRoomFromList('${r.code}')" style="padding:5px 7px;border:1px solid #ddd;border-radius:6px;background:#fff;font-size:11px;cursor:pointer;color:#bbb;" title="삭제">✕</button>
+            </div>`).join('')}
+        </div>` : '';
     el.innerHTML=`
-      <div style="background:#F2F8EC;border-radius:8px;padding:12px;text-align:center;margin-bottom:10px;">
-        <div style="font-size:10px;color:#888;margin-bottom:4px;">현재 방 코드</div>
-        <div style="font-size:24px;font-weight:bold;letter-spacing:6px;color:#1E6614;font-family:monospace;">${currentRoomCode}</div>
-        <div style="font-size:10px;color:#aaa;margin-top:5px;">이 코드를 친구에게 알려주세요 📤<br>같은 코드로 입장하면 실시간으로 공유돼요</div>
+      <div style="background:#F2F8EC;border-radius:8px;padding:10px 12px;margin-bottom:10px;">
+        <div style="font-size:10px;color:#888;margin-bottom:2px;">현재 접속 중</div>
+        <div style="font-size:16px;font-weight:bold;color:#1E6614;">${curName}</div>
+        <div style="font-size:10px;color:#aaa;font-family:monospace;letter-spacing:2px;margin-top:2px;">${currentRoomCode}</div>
+        <div style="font-size:10px;color:#aaa;margin-top:5px;">이 코드를 친구에게 알려주세요 📤</div>
       </div>
-      <button onclick="leaveRoom()" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:8px;background:#fff;color:#999;font-size:11px;cursor:pointer;">방 나가기</button>`;
+      ${roomListHtml}
+      <div style="display:flex;gap:6px;">
+        <button onclick="addNewRoomFromSettings()" style="flex:1;padding:8px;border:1px solid #5A9A32;border-radius:8px;background:#fff;color:#5A9A32;font-size:11px;cursor:pointer;font-weight:bold;">＋ 새 방 만들기</button>
+        <button onclick="leaveRoom()" style="flex:1;padding:8px;border:1px solid #ddd;border-radius:8px;background:#fff;color:#999;font-size:11px;cursor:pointer;">방 나가기</button>
+      </div>`;
   } else {
     el.innerHTML=`
       <p style="font-size:11px;color:#aaa;margin-bottom:8px;">현재 방에 참여하지 않았어요 (로컬 모드)</p>
-      <button onclick="_showRoomScreen()" style="width:100%;padding:9px;border:none;border-radius:8px;background:#5A9A32;color:#fff;font-size:12px;font-weight:bold;cursor:pointer;">방 만들기 / 참여하기</button>`;
+      <div style="display:flex;gap:6px;">
+        <button onclick="addNewRoomFromSettings()" style="flex:1;padding:9px;border:none;border-radius:8px;background:#5A9A32;color:#fff;font-size:12px;font-weight:bold;cursor:pointer;">＋ 새 방 만들기</button>
+        <button onclick="_showRoomScreen()" style="flex:1;padding:9px;border:1px solid #5A9A32;border-radius:8px;background:#fff;color:#5A9A32;font-size:12px;font-weight:bold;cursor:pointer;">기존 방 참여</button>
+      </div>`;
   }
+}
+
+// ── 설정에서 방 이름 변경 ──
+function renameRoomInSettings(code){
+  const rooms = _getSavedRooms();
+  const r = rooms.find(x=>x.code===code);
+  if(!r) return;
+  const newName = prompt(`방 이름을 변경하세요 (현재: ${r.name})`, r.name);
+  if(!newName || !newName.trim()) return;
+  _addOrUpdateRoom(code, newName.trim());
+  updateRoomInfoInSettings();
 }
 
 // ═══════════════════════════════════════════
@@ -2751,6 +2820,7 @@ function switchTab(idx,el){
   updateAppbarForTab(idx);
   if(idx<3){loadTabFilter(idx);if(idx===1)renderCalendar();else if(idx===2)renderList();}
   else{renderUserList();}
+  if(idx<3) setTimeout(_bindDragEvents, 60);
 }
 function toggleFilter(){
   document.getElementById('filterPanel').classList.toggle('open');
