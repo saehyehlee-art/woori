@@ -268,7 +268,7 @@ html, body {
   padding:0 10px; flex-shrink:0; overflow:hidden;
   max-height:0; transition:max-height .25s ease, padding .25s ease;
 }
-.year-range-panel.open { max-height:100px; padding:8px 10px; }
+.year-range-panel.open { max-height:130px; padding:8px 10px; }
 .year-range-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .yr-note { font-size:10px; color:#5A9A32; font-weight:bold; }
 .yr-sub  { font-size:9px; color:#999; }
@@ -643,9 +643,13 @@ html, body {
     </div>
     <div class="year-range-row" style="margin-top:5px;">
       <input id="tlStartYear" class="range-input" type="text" inputmode="numeric" placeholder="2026" oninput="checkTimelineRange()">
-      <span style="color:#999;font-size:12px;">년 ~</span>
+      <span style="color:#999;font-size:11px;">년</span>
+      <input id="tlStartMonth" class="range-input month" type="text" inputmode="numeric" placeholder="1" oninput="checkTimelineRange()">
+      <span style="color:#999;font-size:11px;">월 ~</span>
       <input id="tlEndYear" class="range-input" type="text" inputmode="numeric" placeholder="2027" oninput="checkTimelineRange()">
-      <span style="color:#999;font-size:12px;">년</span>
+      <span style="color:#999;font-size:11px;">년</span>
+      <input id="tlEndMonth" class="range-input month" type="text" inputmode="numeric" placeholder="12" oninput="checkTimelineRange()">
+      <span style="color:#999;font-size:11px;">월</span>
       <button class="apply-btn" id="tlApplyBtn" onclick="applyTimelineRange()">적용</button>
     </div>
     <div class="year-range-row" style="margin-top:3px;">
@@ -752,6 +756,14 @@ html, body {
           </p>
         </div>
         <div class="setting-card">
+          <div class="setting-title">🗂️ 일정 관리</div>
+          <p style="font-size:11px;color:#888;margin-bottom:10px;">같은 날짜·유저·내용의 중복 일정을 제거하거나, 모든 일정을 삭제할 수 있어요.</p>
+          <div style="display:flex;gap:8px;">
+            <button onclick="deduplicateEvents()" style="flex:1;padding:9px;border:1px solid #5A9A32;border-radius:8px;background:#fff;color:#5A9A32;font-size:11px;cursor:pointer;">🔁 일정 중복제거</button>
+            <button onclick="deleteAllEvents()" style="flex:1;padding:9px;border:1px solid #D32F2F;border-radius:8px;background:#fff;color:#D32F2F;font-size:11px;cursor:pointer;">🗑️ 일정 전체 삭제</button>
+          </div>
+        </div>
+        <div class="setting-card">
           <div class="setting-title">ℹ️ 앱 정보</div>
           <p style="font-size:12px;color:#666;">우리일정 v1.0.0</p>
         </div>
@@ -762,7 +774,7 @@ html, body {
   <!-- 하단 탭바 -->
   <div class="tabbar">
     <button class="tab-item active" onclick="switchTab(0,this)"><span class="tab-icon">📋</span>타임라인</button>
-    <button class="tab-item"        onclick="switchTab(1,this)"><span class="tab-icon">📆</span>달력</button>
+    <button class="tab-item"        onclick="switchTab(1,this)"><span class="tab-icon">🗓️</span>달력</button>
     <button class="tab-item"        onclick="switchTab(2,this)"><span class="tab-icon">📑</span>리스트</button>
     <button class="tab-item"        onclick="switchTab(3,this)"><span class="tab-icon">⚙️</span>설정</button>
   </div>
@@ -996,8 +1008,9 @@ const _today = new Date();
 const _todayY = _today.getFullYear();
 const _todayM = _today.getMonth() + 1; // 1~12
 
-// 타임라인: 오늘 연도 ~ 내년 말
-let timelineStartYear = _todayY, timelineEndYear = _todayY + 1;
+// 타임라인: 오늘 월 ~ 내년 12월
+let timelineStartYear = _todayY, timelineStartMonth = _todayM;
+let timelineEndYear   = _todayY + 1, timelineEndMonth = 12;
 
 // ═══════════════════════════════════════════
 //  리스트 표시 범위 (연+월)
@@ -1269,7 +1282,8 @@ function rowPassesFilter(date, dStr, visEvts){
 // ═══════════════════════════════════════════
 function renderTimeline(){
   const body = document.getElementById('timeline-body');
-  const start=new Date(timelineStartYear,0,1), end=new Date(timelineEndYear,11,31);
+  const start=new Date(timelineStartYear, timelineStartMonth-1, 1);
+  const end  =new Date(timelineEndYear,   timelineEndMonth-1,   new Date(timelineEndYear, timelineEndMonth, 0).getDate());
   let html='', count=0;
 
   for(let d=new Date(start); d<=end; d.setDate(d.getDate()+1)){
@@ -1576,6 +1590,38 @@ function saveEvent(){
   closeModal(); buildDatalistOptions(); renderTimeline(); renderCalendar(); renderList();
   pushToFirebase();
   alert(`✅ 반복 일정 ${generated.length}개 추가됐어요!`);
+}
+
+// ═══════════════════════════════════════════
+//  설정 - 일정 관리 (중복제거 / 전체삭제)
+// ═══════════════════════════════════════════
+function deduplicateEvents(){
+  const before = events.length;
+  const seen = new Set();
+  events = events.filter(e => {
+    // 날짜+유저+제목+시간 동일하면 중복으로 판단
+    const key = [e.startDate||'', e.endDate||'', e.userLabel||'', e.title||'', e.time||''].join('|');
+    if(seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const removed = before - events.length;
+  if(removed === 0){
+    alert('중복 일정이 없어요 😊');
+  } else {
+    alert(`✅ 중복 일정 ${removed}개를 제거했어요!`);
+    renderTimeline(); renderCalendar(); renderList();
+    pushToFirebase();
+  }
+}
+
+function deleteAllEvents(){
+  if(events.length === 0){ alert('삭제할 일정이 없어요'); return; }
+  if(!confirm(`⚠️ 모든 일정 ${events.length}개를 삭제할까요?\n이 작업은 되돌릴 수 없어요.`)) return;
+  events = [];
+  renderTimeline(); renderCalendar(); renderList();
+  pushToFirebase();
+  alert('✅ 모든 일정이 삭제되었어요.');
 }
 
 // ═══════════════════════════════════════════
@@ -2093,7 +2139,7 @@ const allH={...HOLIDAYS,...customHolidays};
       html+=`<div class="list-item" style="${!canEdit?'opacity:.8;':''}"
         onclick="${canEdit?`openEditModal('${e.id}',event)`:`showEventView('${e.id}',event)`}">
         <span class="list-clover" style="transform:rotate(${rotAngle}deg);filter:${cloverFilter};">🍀</span>
-        ${e.time?`<span class="list-item-time">${e.time}</span>`:`<span class="list-item-time" style="min-width:36px;"></span>`}
+        ${e.time?`<span class="list-item-time">${e.time}</span>`:`<span class="list-item-time"></span>`}
         <span class="list-item-user" style="background:${pal.bg};color:${pal.text};border:1px solid ${pal.border};">${e.userLabel}</span>
         <span class="list-item-title">${e.title}</span>
       </div>`;
@@ -2620,36 +2666,42 @@ function updateAppbarForTab(idx){
 
 // ── 타임라인 기간 검증 공통 ──
 function _validateTimelineRange(){
-  const sy=parseInt(document.getElementById('tlStartYear').value)||2026;
-  const ey=parseInt(document.getElementById('tlEndYear').value)||2027;
+  const sy=parseInt(document.getElementById('tlStartYear').value)||_todayY;
+  const sm=parseInt(document.getElementById('tlStartMonth').value)||1;
+  const ey=parseInt(document.getElementById('tlEndYear').value)||_todayY+1;
+  const em=parseInt(document.getElementById('tlEndMonth').value)||12;
+  const csm=Math.max(1,Math.min(12,sm));
+  const cem=Math.max(1,Math.min(12,em));
   const msg=document.getElementById('tlRangeMsg');
   const btn=document.getElementById('tlApplyBtn');
-  if(sy>ey){
-    if(msg){ msg.textContent='⚠️ 시작 연도가 종료 연도보다 클 수 없어요'; msg.style.color='#D32F2F'; }
-    if(btn) btn.disabled=true; return null;
-  }
   if(sy<1900||sy>2500||ey<1900||ey>2500){
     if(msg){ msg.textContent='⚠️ 1900 ~ 2500 범위로 입력해주세요'; msg.style.color='#D32F2F'; }
     if(btn) btn.disabled=true; return null;
   }
-  if(ey-sy>2){
-    if(msg){ msg.textContent='⚠️ 최대 3년(연도 차이 2)까지만 설정할 수 있어요'; msg.style.color='#D32F2F'; }
+  if(ey<sy||(ey===sy&&cem<csm)){
+    if(msg){ msg.textContent='⚠️ 종료 월이 시작 월보다 빠릅니다'; msg.style.color='#D32F2F'; }
+    if(btn) btn.disabled=true; return null;
+  }
+  const monthsDiff=(ey-sy)*12+(cem-csm);
+  if(monthsDiff>35){
+    if(msg){ msg.textContent='⚠️ 최대 36개월(3년)까지만 설정할 수 있어요'; msg.style.color='#D32F2F'; }
     if(btn) btn.disabled=true; return null;
   }
   if(btn) btn.disabled=false;
-  return {sy,ey};
+  return {sy,sm:csm,ey,em:cem};
 }
 function checkTimelineRange(){
   const v=_validateTimelineRange();
   const msg=document.getElementById('tlRangeMsg');
-  if(v && msg){ msg.textContent=`${v.sy}년 ~ ${v.ey}년`; msg.style.color='#888'; }
+  if(v && msg){ msg.textContent=`${v.sy}년 ${v.sm}월 ~ ${v.ey}년 ${v.em}월`; msg.style.color='#888'; }
 }
 function applyTimelineRange(){
   const v=_validateTimelineRange();
   if(!v) return;
-  timelineStartYear=v.sy; timelineEndYear=v.ey;
+  timelineStartYear=v.sy; timelineStartMonth=v.sm;
+  timelineEndYear=v.ey;   timelineEndMonth=v.em;
   const msg=document.getElementById('tlRangeMsg');
-  if(msg){ msg.textContent=`✅ ${v.sy}년 ~ ${v.ey}년 적용됨`; msg.style.color='#5A9A32'; }
+  if(msg){ msg.textContent=`✅ ${v.sy}년 ${v.sm}월 ~ ${v.ey}년 ${v.em}월 적용됨`; msg.style.color='#5A9A32'; }
   renderTimeline();
 }
 // 구버전 호환용 별칭
@@ -2658,7 +2710,7 @@ function updateTimelineRange(){ applyTimelineRange(); }
 function switchTab(idx,el){
   saveTabFilter(currentTabIdx);
   currentTabIdx=idx;
-  const TAB_ICONS=['📋','📆','📑','⚙️'];
+  const TAB_ICONS=['📋','🗓️','📑','⚙️'];
   document.querySelectorAll('.screen').forEach((s,i)=>s.classList.toggle('active',i===idx));
   document.querySelectorAll('.tab-item').forEach((t,i)=>{
     t.classList.remove('active');
@@ -2737,12 +2789,14 @@ function initRangeSelects(){
   });
 
   const curM = new Date().getMonth() + 1;
-  const monthDefs = { lstStartMonth:curM, lstEndMonth:12 }; // 리스트 시작 월 = 오늘 월
-  ['lstStartMonth','lstEndMonth'].forEach(id => {
+  const monthDefs = { tlStartMonth:curM, tlEndMonth:12,
+                      lstStartMonth:curM, lstEndMonth:12 };
+  ['tlStartMonth','tlEndMonth','lstStartMonth','lstEndMonth'].forEach(id => {
     const inp = document.getElementById(id);
     if(!inp) return;
     inp.value = monthDefs[id];
-    inp.addEventListener('focus', ()=> showRangeDropdown(inp, monthOpts, updateListRange));
+    const fn = id.startsWith('tl') ? updateTimelineRange : updateListRange;
+    inp.addEventListener('focus', ()=> showRangeDropdown(inp, monthOpts, fn));
     inp.addEventListener('blur',  ()=> { _rdBlurTimer=setTimeout(hideRangeDropdown,180); });
   });
 }
