@@ -2017,23 +2017,24 @@ function _parseAndOpenXlModal(base64str){
     const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
     if(!rows.length){ alert('빈 파일이에요.'); return; }
 
-    // 헤더행 찾기 (연도/년/월/일 포함된 첫 행)
-    let hdrIdx = 0;
-    for(let i=0;i<Math.min(5,rows.length);i++){
-      const r = rows[i].map(v=>String(v));
-      if(r.some(v=>/^(연도|년도|년)$/.test(v)) && r.some(v=>/^월$/.test(v))){
+    // 헤더행 찾기 (연도/년/월/일 포함된 첫 행) — 대소문자·공백 무시, 영문도 허용
+    const isYearHeader = v => /^(연도|년도|년|year)$/i.test(String(v).trim());
+    const isMonthHeader = v => /^(월|month)$/i.test(String(v).trim());
+    let hdrIdx = -1;
+    for(let i=0;i<Math.min(10,rows.length);i++){
+      const r = rows[i];
+      if(r.some(isYearHeader) && r.some(isMonthHeader)){
         hdrIdx = i; break;
       }
     }
-    const headers  = rows[hdrIdx].map(v=>String(v).trim());
-    const dataRows = rows.slice(hdrIdx+1);
-
-    // 헤더가 전혀 인식되지 않으면 파일 형식 오류
-    const hasDateCols = headers.some(h=>/^(연도|년도|년)$/.test(h)) && headers.some(h=>/^월$/.test(h));
-    if(!hasDateCols){
-      alert('❌ 엑셀 형식을 인식하지 못했어요.\n\n연도·월·일 컬럼이 있는 .xlsx 파일을 선택해주세요.\n\n📱 iOS: 카카오톡 파일 → 길게 누르기 → "파일 앱에 저장" 후 다시 시도해주세요.');
+    if(hdrIdx < 0){
+      // 헤더를 못 찾았을 때 — 실제 첫 행 내용 보여주기
+      const firstRow = (rows[0]||[]).map(v=>String(v).trim()).filter(Boolean).slice(0,6).join(', ');
+      alert(`❌ 엑셀 형식을 인식하지 못했어요.\n\n첫 번째 행에서 인식된 컬럼: [${firstRow||'(없음)'}]\n\n'연도', '월', '일' 컬럼이 있어야 해요.\n\n📱 iOS: 카카오톡 파일 → 길게 누르기 → "파일 앱에 저장" 후 다시 시도해주세요.`);
       return;
     }
+    const headers  = rows[hdrIdx].map(v=>String(v).trim());
+    const dataRows = rows.slice(hdrIdx+1);
 
     _xlParsed = { headers, dataRows };
     _buildXlModal(headers, dataRows);
@@ -2079,11 +2080,11 @@ function _colRoleOptions(selected){
 
 function _guessRole(header){
   const h = header.replace(/\s/g,'');
-  if(/^(연도|년도|년)$/.test(h))  return 'year';
-  if(/^월$/.test(h))              return 'month';
-  if(/^일$/.test(h))              return 'day';
-  if(/^요일$/.test(h))            return 'ignore';
-  if(/특이|공휴|holiday/i.test(h)) return 'special';
+  if(/^(연도|년도|년|year)$/i.test(h))  return 'year';
+  if(/^(월|month)$/i.test(h))           return 'month';
+  if(/^(일|day)$/i.test(h))             return 'day';
+  if(/^(요일|weekday|week)$/i.test(h))  return 'ignore';
+  if(/특이|공휴|holiday|note|remark/i.test(h)) return 'special';
   if(/[&＆+]/.test(h))            return 'shared';  // "세혜&지석" 같은 패턴
   // 유저 이름 매칭
   for(const u of users){
