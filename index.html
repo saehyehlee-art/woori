@@ -1076,9 +1076,21 @@ function _addOrUpdateRoom(code, name){
   else { rooms.push({code,name}); }
   _saveRooms(rooms);
   localStorage.setItem(ROOM_LS_KEY, code);
+  // 구글 로그인 상태면 Firebase에도 즉시 동기화
+  _syncRoomsToFirebase();
 }
 
 async function enterSavedRoom(code){
+  const savedUser = localStorage.getItem(USER_LS_KEY);
+  if(savedUser){
+    // 이름이 저장돼 있으면 이름 선택 화면 없이 바로 입장
+    currentUser = savedUser;
+    if(!users.includes(savedUser)) users.push(savedUser);
+    _setRoom(code);
+    _enterApp();
+    return;
+  }
+  // 이름이 없으면 이름 선택 화면 표시
   _pendingRoomCode = code;
   let existingUsers=[];
   if(typeof window._fbGetRoomData==='function'){
@@ -1108,6 +1120,7 @@ function addNewRoomFromSettings(){
 function deleteRoomFromList(code){
   if(!confirm('이 방을 목록에서 삭제할까요?')) return;
   _saveRooms(_getSavedRooms().filter(r=>r.code!==code));
+  _syncRoomsToFirebase();
   updateRoomInfoInSettings();
 }
 
@@ -2358,17 +2371,17 @@ function _onLoginSuccess(){
     if(rooms.length>0 && savedUser){
       currentUser=savedUser;
       if(!users.includes(savedUser)) users.push(savedUser);
-      const code=lastCode||rooms[0].code;
-      _setRoom(code);
-      _enterApp();
+      if(rooms.length===1){
+        // 방이 하나면 바로 입장 (가장 빠른 경험)
+        _setRoom(lastCode||rooms[0].code);
+        _enterApp();
+      } else {
+        // 방이 여러 개면 방 목록 화면 표시 → 클릭만 하면 바로 입장
+        _showRoomScreen();
+      }
     } else if(rooms.length>0){
-      const code=lastCode||rooms[0].code;
-      _pendingRoomCode=code;
-      (async()=>{
-        let eu=[];
-        if(typeof window._fbGetRoomData==='function'){try{const d=await window._fbGetRoomData(code);if(d&&Array.isArray(d.users))eu=d.users;}catch(e){}}
-        _showNameScreen(eu,false);
-      })();
+      // 이름이 없는 경우 → 방 목록 화면 (enterSavedRoom에서 이름 입력)
+      _showRoomScreen();
     } else {
       _showRoomScreen();
     }
@@ -2697,6 +2710,8 @@ function confirmName(){
   if(_pendingRoomCode){
     _setRoom(_pendingRoomCode);
   }
+  // 이름 확정 시 Firebase에 즉시 동기화
+  _syncRoomsToFirebase();
   _enterApp();
 }
 
@@ -2812,6 +2827,7 @@ function leaveRoom(){
   if(_roomUnsubscribe){_roomUnsubscribe();_roomUnsubscribe=null;}
   if(_notifUnsubscribe){_notifUnsubscribe();_notifUnsubscribe=null;}
   _saveRooms(_getSavedRooms().filter(r=>r.code!==currentRoomCode));
+  _syncRoomsToFirebase();
   currentRoomCode=null;
   localStorage.removeItem(ROOM_LS_KEY);
   // 방 데이터 초기화
@@ -2833,19 +2849,24 @@ function _showSyncBadge(msg){
 }
 
 // ── 앱 화면으로 진입 + 오늘 스크롤 ──
-// 구글 계정에 현재 방·이름 프로필 저장 (다음 로그인 시 자동 복원용)
-function _saveUserProfileToFirebase(){
+// 구글 계정에 방 목록·이름·현재방 프로필 저장 (다기기 복원용)
+// 어느 시점에서나 호출 가능 — 로그인 안 된 상태면 자동 무시됨
+function _syncRoomsToFirebase(){
   if(typeof window._fbGetCurrentUser !== 'function') return;
   const fbUser = window._fbGetCurrentUser();
   if(!fbUser || !fbUser.uid) return;
   if(typeof window._fbSaveUserProfile !== 'function') return;
+  const userName = currentUser || localStorage.getItem(USER_LS_KEY) || null;
+  const lastRoom = currentRoomCode || localStorage.getItem(ROOM_LS_KEY) || null;
   window._fbSaveUserProfile(fbUser.uid, {
-    lastRoom: currentRoomCode || null,
-    userName: currentUser || null,
+    lastRoom,
+    userName,
     rooms: _getSavedRooms(),
     updatedAt: Date.now()
-  }).catch(e => console.warn('프로필 저장 실패:', e));
+  }).catch(e => console.warn('프로필 Firebase 저장 실패:', e));
 }
+// 기존 이름과의 호환성 유지
+function _saveUserProfileToFirebase(){ _syncRoomsToFirebase(); }
 
 function _enterApp(){
 ['appbar','content','tabbar'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='';});   document.getElementById('roomScreen').style.display = 'none';
